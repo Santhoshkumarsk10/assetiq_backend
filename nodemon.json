@@ -1,0 +1,12 @@
+{
+  "watch": ["server.js", "src/"],
+  "ignore": [
+    "node_modules",
+    "src/migrations",
+    "src/seeders",
+    ".git",
+    ".vscode"
+  ],
+  "ext": "js,json",
+  "legacyWatch": true
+}
