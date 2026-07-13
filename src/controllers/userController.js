@@ -21,7 +21,8 @@ async function listUsers(req, res) {
     let queryOptions = {
       include: [
         { model: Role, as: 'role' },
-        { model: Location, as: 'location' }
+        { model: Location, as: 'location' },
+        { model: User, as: 'reportingManager', attributes: ['id', 'name', 'email'] }
       ],
       order: [['name', 'ASC']]
     };
@@ -96,7 +97,7 @@ async function listUsers(req, res) {
  * Add User
  */
 async function addUser(req, res) {
-  const { employee_id, name, email, phone, password, role_id, location_id, department, designation } = req.body;
+  const { employee_id, name, email, phone, password, role_id, location_id, department, designation, reporting_manager_id } = req.body;
   const isLocationAdmin = req.user.role_name === 'Location Admin';
   const myLocId = req.user.location_id;
 
@@ -144,6 +145,7 @@ async function addUser(req, res) {
       location_id: targetLocId,
       department: department || null,
       designation: designation || null,
+      reporting_manager_id: reporting_manager_id || null,
       status: 'active'
     });
 
@@ -175,7 +177,7 @@ async function addUser(req, res) {
  */
 async function editUser(req, res) {
   const id = req.body.id || req.params.id;
-  const { employee_id, name, email, phone, password, role_id, location_id, department, designation, status } = req.body;
+  const { employee_id, name, email, phone, password, role_id, location_id, department, designation, status, reporting_manager_id } = req.body;
   const isLocationAdmin = req.user.role_name === 'Location Admin';
   const myLocId = req.user.location_id;
 
@@ -216,6 +218,7 @@ async function editUser(req, res) {
     user.department = department !== undefined ? department : user.department;
     user.designation = designation !== undefined ? designation : user.designation;
     user.status = status || user.status;
+    user.reporting_manager_id = reporting_manager_id !== undefined ? (reporting_manager_id || null) : user.reporting_manager_id;
 
     if (!isLocationAdmin) {
       user.role_id = role_id || user.role_id;
@@ -579,6 +582,22 @@ async function toggleMfa(req, res) {
   }
 }
 
+async function listManagers(req, res) {
+  try {
+    const managers = await User.findAll({
+      where: {
+        status: 'active'
+      },
+      attributes: ['id', 'name', 'email', 'designation'],
+      order: [['name', 'ASC']]
+    });
+    return res.json({ success: true, managers });
+  } catch (error) {
+    console.error('Error listing managers:', error);
+    return res.status(500).json({ error: 'Database error fetching managers list.' });
+  }
+}
+
 module.exports = {
   listUsers,
   addUser,
@@ -587,5 +606,6 @@ module.exports = {
   resignUser,
   verifyOffboardReturn,
   listOffboardingQueue,
-  toggleMfa
+  toggleMfa,
+  listManagers
 };

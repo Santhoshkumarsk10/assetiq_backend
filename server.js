@@ -9,6 +9,63 @@ const apiRoutes = require('./src/routes/api');
 const app = express();
 const PORT = process.env.PORT || 5003;
 
+const http = require('http');
+const { Server } = require('socket.io');
+
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
+
+// Attach socket server to request object
+app.use((req, res, next) => {
+  req.io = io;
+  
+  // Intercept response to emit socket events on successful mutations
+  const originalJson = res.json;
+  res.json = function (body) {
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      const path = req.originalUrl || req.path;
+      const isRead = path.includes('/list') || path.includes('/details');
+      if (!isRead) {
+        setTimeout(() => {
+          if (path.includes('/onboarding') || path.includes('/email-requests') || path.includes('/users/offboard')) {
+            io.emit('onboarding_change');
+          }
+          if (path.includes('/assets/requests')) {
+            io.emit('asset_request_change');
+          }
+        }, 50);
+      }
+    }
+    return originalJson.call(this, body);
+  };
+  
+  const originalSend = res.send;
+  res.send = function (body) {
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      const path = req.originalUrl || req.path;
+      const isRead = path.includes('/list') || path.includes('/details');
+      if (!isRead) {
+        setTimeout(() => {
+          if (path.includes('/onboarding') || path.includes('/email-requests') || path.includes('/users/offboard')) {
+            io.emit('onboarding_change');
+          }
+          if (path.includes('/assets/requests')) {
+            io.emit('asset_request_change');
+          }
+        }, 50);
+      }
+    }
+    return originalSend.call(this, body);
+  };
+  
+  next();
+});
+
 // 1. Parsing and CORS Middlewares
 app.use(cors({
   origin: true, // or specify frontend URL
@@ -95,6 +152,86 @@ async function runAutoMigrations() {
         allowNull: true
       });
     }
+
+    if (!userTableInfo.reporting_manager_id) {
+      console.log('[MIGRATION] Adding reporting_manager_id column to users...');
+      await queryInterface.addColumn('users', 'reporting_manager_id', {
+        type: sequelize.Sequelize.INTEGER,
+        allowNull: true,
+        references: {
+          model: 'users',
+          key: 'id'
+        },
+        onUpdate: 'CASCADE',
+        onDelete: 'SET NULL'
+      });
+    }
+
+    // 4. Create asset_requests table if missing
+    const tables = await queryInterface.showAllTables();
+    if (!tables.includes('asset_requests')) {
+      console.log('[MIGRATION] Creating asset_requests table...');
+      await queryInterface.createTable('asset_requests', {
+        id: {
+          type: sequelize.Sequelize.INTEGER,
+          autoIncrement: true,
+          primaryKey: true,
+          allowNull: false
+        },
+        location_id: {
+          type: sequelize.Sequelize.INTEGER,
+          allowNull: false,
+          references: {
+            model: 'locations',
+            key: 'id'
+          },
+          onUpdate: 'CASCADE',
+          onDelete: 'CASCADE'
+        },
+        requested_by: {
+          type: sequelize.Sequelize.INTEGER,
+          allowNull: false,
+          references: {
+            model: 'users',
+            key: 'id'
+          },
+          onUpdate: 'CASCADE',
+          onDelete: 'CASCADE'
+        },
+        asset_name: {
+          type: sequelize.Sequelize.STRING(255),
+          allowNull: false
+        },
+        asset_type: {
+          type: sequelize.Sequelize.STRING(50),
+          allowNull: false
+        },
+        quantity: {
+          type: sequelize.Sequelize.INTEGER,
+          defaultValue: 1,
+          allowNull: false
+        },
+        status: {
+          type: sequelize.Sequelize.ENUM('pending', 'purchased', 'completed'),
+          defaultValue: 'pending',
+          allowNull: false
+        },
+        notes: {
+          type: sequelize.Sequelize.TEXT,
+          allowNull: true
+        },
+        created_at: {
+          type: sequelize.Sequelize.DATE,
+          allowNull: false,
+          defaultValue: sequelize.Sequelize.literal('CURRENT_TIMESTAMP')
+        },
+        updated_at: {
+          type: sequelize.Sequelize.DATE,
+          allowNull: false,
+          defaultValue: sequelize.Sequelize.literal('CURRENT_TIMESTAMP')
+        }
+      });
+    }
   } catch (error) {
     console.error('[MIGRATION ERROR] Failed to run auto-migrations:', error.message);
   }
@@ -109,9 +246,9 @@ async function startServer() {
     // Run auto migrations
     await runAutoMigrations();
     
-    app.listen(PORT, '0.0.0.0', () => {
+    server.listen(PORT, '0.0.0.0', () => {
       console.log(`==================================================`);
-      console.log(` AssetIQ REST API Server Running on http://localhost:${PORT}`);
+      console.log(` AssetIQ REST & Socket Server Running on http://localhost:${PORT}`);
       console.log(` Mode: ${process.env.NODE_ENV || 'development'}`);
       console.log(` Database Host: ${process.env.DB_HOST || '127.0.0.1'}`);
       console.log(`==================================================`);
