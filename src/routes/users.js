@@ -12,5 +12,6 @@ router.post('/resign', authenticate, requirePermission('user.resign'), userContr
 router.post('/offboard-verify', authenticate, requirePermission('onboarding.edit'), userController.verifyOffboardReturn);
 router.post('/offboard-list', authenticate, requirePermission('onboarding.list'), userController.listOffboardingQueue);
 router.post('/mfa-toggle', authenticate, userController.toggleMfa);
+router.post('/managers', authenticate, userController.listManagers);
 
 module.exports = router;

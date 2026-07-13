@@ -79,6 +79,10 @@ const User = sequelize.define('User', {
   reset_token_expiry: {
     type: DataTypes.DATE,
     allowNull: true
+  },
+  reporting_manager_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true
   }
 }, {
   timestamps: true,
@@ -89,6 +93,8 @@ const User = sequelize.define('User', {
 User.associate = (models) => {
   User.belongsTo(models.Role, { foreignKey: 'role_id', as: 'role' });
   User.belongsTo(models.Location, { foreignKey: 'location_id', as: 'location' });
+  User.belongsTo(models.User, { foreignKey: 'reporting_manager_id', as: 'reportingManager' });
+  User.hasMany(models.User, { foreignKey: 'reporting_manager_id', as: 'reportees' });
   User.hasMany(models.AssetAllocation, { foreignKey: 'user_id', as: 'allocations' });
   User.hasMany(models.AssetAllocation, { foreignKey: 'allocated_by', as: 'allocationsMade' });
   User.hasMany(models.OnboardingRequest, { foreignKey: 'created_by', as: 'onboardingRequestsCreated' });
