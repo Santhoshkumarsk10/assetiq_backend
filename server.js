@@ -5,6 +5,7 @@ require('dotenv').config();
 
 const { sequelize } = require('./src/models');
 const apiRoutes = require('./src/routes/api');
+const { setIo } = require('./src/socket');
 
 const app = express();
 const PORT = process.env.PORT || 5003;
@@ -18,6 +19,18 @@ const io = new Server(server, {
     origin: "*",
     methods: ["GET", "POST"]
   }
+});
+
+// Register io in the shared socket singleton so controllers can use it
+setIo(io);
+
+// Socket.io: per-user rooms so targeted notifications can be sent
+io.on('connection', (socket) => {
+  socket.on('join_user_room', (userId) => {
+    if (userId) {
+      socket.join(`user_${userId}`);
+    }
+  });
 });
 
 // Attach socket server to request object
@@ -38,6 +51,9 @@ app.use((req, res, next) => {
           if (path.includes('/assets/requests')) {
             io.emit('asset_request_change');
           }
+          if (path.includes('/licenses')) {
+            io.emit('license_change');
+          }
         }, 50);
       }
     }
@@ -56,6 +72,9 @@ app.use((req, res, next) => {
           }
           if (path.includes('/assets/requests')) {
             io.emit('asset_request_change');
+          }
+          if (path.includes('/licenses')) {
+            io.emit('license_change');
           }
         }, 50);
       }
@@ -232,6 +251,225 @@ async function runAutoMigrations() {
         }
       });
     }
+
+    // 5. Create software_licenses table if missing
+    if (!tables.includes('software_licenses')) {
+      console.log('[MIGRATION] Creating software_licenses table...');
+      await queryInterface.createTable('software_licenses', {
+        id: {
+          type: sequelize.Sequelize.INTEGER,
+          autoIncrement: true,
+          primaryKey: true,
+          allowNull: false
+        },
+        software_name: {
+          type: sequelize.Sequelize.STRING(255),
+          allowNull: false
+        },
+        license_key: {
+          type: sequelize.Sequelize.STRING(255),
+          allowNull: false
+        },
+        valid_from: {
+          type: sequelize.Sequelize.DATEONLY,
+          allowNull: true
+        },
+        valid_until: {
+          type: sequelize.Sequelize.DATEONLY,
+          allowNull: true
+        },
+        assigned_user_id: {
+          type: sequelize.Sequelize.INTEGER,
+          allowNull: true,
+          references: {
+            model: 'users',
+            key: 'id'
+          },
+          onUpdate: 'CASCADE',
+          onDelete: 'SET NULL'
+        },
+        mapped_asset_id: {
+          type: sequelize.Sequelize.INTEGER,
+          allowNull: true,
+          references: {
+            model: 'assets',
+            key: 'id'
+          },
+          onUpdate: 'CASCADE',
+          onDelete: 'SET NULL'
+        },
+        status: {
+          type: sequelize.Sequelize.ENUM('available', 'active', 'expired'),
+          defaultValue: 'available',
+          allowNull: false
+        },
+        notes: {
+          type: sequelize.Sequelize.TEXT,
+          allowNull: true
+        },
+        created_at: {
+          type: sequelize.Sequelize.DATE,
+          allowNull: false,
+          defaultValue: sequelize.Sequelize.literal('CURRENT_TIMESTAMP')
+        },
+        updated_at: {
+          type: sequelize.Sequelize.DATE,
+          allowNull: false,
+          defaultValue: sequelize.Sequelize.literal('CURRENT_TIMESTAMP')
+        }
+      });
+    }
+
+    // 6. Add reporting_manager_id column to onboarding_requests if missing
+    const onboardingTableInfo = await queryInterface.describeTable('onboarding_requests');
+    if (!onboardingTableInfo.reporting_manager_id) {
+      console.log('[MIGRATION] Adding reporting_manager_id column to onboarding_requests...');
+      await queryInterface.addColumn('onboarding_requests', 'reporting_manager_id', {
+        type: sequelize.Sequelize.INTEGER,
+        allowNull: true,
+        references: {
+          model: 'users',
+          key: 'id'
+        },
+        onUpdate: 'CASCADE',
+        onDelete: 'SET NULL'
+      });
+    }
+
+    // 7. Create notifications table if missing
+    if (!tables.includes('notifications')) {
+      console.log('[MIGRATION] Creating notifications table...');
+      await queryInterface.createTable('notifications', {
+        id: {
+          type: sequelize.Sequelize.INTEGER,
+          autoIncrement: true,
+          primaryKey: true,
+          allowNull: false
+        },
+        user_id: {
+          type: sequelize.Sequelize.INTEGER,
+          allowNull: false,
+          references: { model: 'users', key: 'id' },
+          onUpdate: 'CASCADE',
+          onDelete: 'CASCADE'
+        },
+        title: { type: sequelize.Sequelize.STRING(255), allowNull: false },
+        message: { type: sequelize.Sequelize.TEXT, allowNull: false },
+        type: { type: sequelize.Sequelize.STRING(100), defaultValue: 'info' },
+        reference_id: { type: sequelize.Sequelize.INTEGER, allowNull: true },
+        is_read: { type: sequelize.Sequelize.BOOLEAN, defaultValue: false },
+        created_at: {
+          type: sequelize.Sequelize.DATE,
+          allowNull: false,
+          defaultValue: sequelize.Sequelize.literal('CURRENT_TIMESTAMP')
+        },
+        updated_at: {
+          type: sequelize.Sequelize.DATE,
+          allowNull: false,
+          defaultValue: sequelize.Sequelize.literal('CURRENT_TIMESTAMP')
+        }
+      });
+    }
+
+    // 8. Create license_renewal_requests table if missing
+    if (!tables.includes('license_renewal_requests')) {
+      console.log('[MIGRATION] Creating license_renewal_requests table...');
+      await queryInterface.createTable('license_renewal_requests', {
+        id: {
+          type: sequelize.Sequelize.INTEGER,
+          autoIncrement: true,
+          primaryKey: true,
+          allowNull: false
+        },
+        license_id: {
+          type: sequelize.Sequelize.INTEGER,
+          allowNull: false,
+          references: { model: 'software_licenses', key: 'id' },
+          onUpdate: 'CASCADE',
+          onDelete: 'CASCADE'
+        },
+        requested_by: {
+          type: sequelize.Sequelize.INTEGER,
+          allowNull: false,
+          references: { model: 'users', key: 'id' },
+          onUpdate: 'CASCADE',
+          onDelete: 'CASCADE'
+        },
+        approved_by: {
+          type: sequelize.Sequelize.INTEGER,
+          allowNull: true,
+          references: { model: 'users', key: 'id' },
+          onUpdate: 'CASCADE',
+          onDelete: 'SET NULL'
+        },
+        status: {
+          type: sequelize.Sequelize.ENUM('pending', 'approved', 'rejected'),
+          defaultValue: 'pending',
+          allowNull: false
+        },
+        proposed_valid_until: { type: sequelize.Sequelize.DATEONLY, allowNull: true },
+        renewal_notes: { type: sequelize.Sequelize.TEXT, allowNull: true },
+        response_notes: { type: sequelize.Sequelize.TEXT, allowNull: true },
+        created_at: {
+          type: sequelize.Sequelize.DATE,
+          allowNull: false,
+          defaultValue: sequelize.Sequelize.literal('CURRENT_TIMESTAMP')
+        },
+        updated_at: {
+          type: sequelize.Sequelize.DATE,
+          allowNull: false,
+          defaultValue: sequelize.Sequelize.literal('CURRENT_TIMESTAMP')
+        }
+      });
+    }
+
+    // 9. Seed license permissions if not already present
+    const { Permission, Role } = require('./src/models');
+    const existingLicensePerm = await Permission.findOne({ where: { name: 'license.list' } });
+    if (!existingLicensePerm) {
+      console.log('[MIGRATION] Seeding license permissions...');
+      const licensePerms = [
+        { id: 32, name: 'license.list',           description: 'View software license list' },
+        { id: 33, name: 'license.add',            description: 'Add new software licenses' },
+        { id: 34, name: 'license.edit',           description: 'Edit software licenses' },
+        { id: 35, name: 'license.delete',         description: 'Delete software licenses' },
+        { id: 36, name: 'license.renewal.submit', description: 'Submit a license renewal request (IT Admin)' },
+        { id: 37, name: 'license.renewal.decide', description: 'Approve or reject a renewal request (Admin)' },
+        { id: 38, name: 'license.notify',         description: 'Notify assigned user after license renewal (Location Admin)' },
+      ];
+
+      for (const p of licensePerms) {
+        await queryInterface.bulkInsert('permissions', [{
+          ...p,
+          created_at: new Date(),
+          updated_at: new Date()
+        }]).catch(() => {}); // ignore duplicate-key errors on re-runs
+      }
+
+      // Assign to roles:
+      //  Super Admin (1) & Admin (2): all license permissions
+      //  IT Admin — we look up by name since ID may vary
+      //  Location Admin (3): only license.list + license.notify
+
+      const superAdminRole = await Role.findOne({ where: { name: 'Super Admin' } });
+      const adminRole      = await Role.findOne({ where: { name: 'Admin' } });
+      const itAdminRole    = await Role.findOne({ where: { name: 'IT Admin' } });
+      const locAdminRole   = await Role.findOne({ where: { name: 'Location Admin' } });
+
+      const assignPerms = async (roleId, permIds) => {
+        for (const pid of permIds) {
+          await queryInterface.bulkInsert('role_permissions', [{ role_id: roleId, permission_id: pid }]).catch(() => {});
+        }
+      };
+
+      if (superAdminRole) await assignPerms(superAdminRole.id, [32,33,34,35,36,37,38]);
+      if (adminRole)      await assignPerms(adminRole.id,      [32,33,34,35,36,37]);   // Admin doesn't notify (that's Loc Admin)
+      if (itAdminRole)    await assignPerms(itAdminRole.id,    [32,33,34,35,36]);       // IT Admin: list/add/edit/delete/submit renewal
+      if (locAdminRole)   await assignPerms(locAdminRole.id,   [32,38]);                // Location Admin: list + notify
+
+      console.log('[MIGRATION] License permissions seeded and assigned to roles.');
+    }
+
   } catch (error) {
     console.error('[MIGRATION ERROR] Failed to run auto-migrations:', error.message);
   }
@@ -245,7 +483,14 @@ async function startServer() {
     
     // Run auto migrations
     await runAutoMigrations();
-    
+
+    // Start hourly license expiry check
+    const { checkAndMarkExpiredLicenses } = require('./src/controllers/licenseController');
+    checkAndMarkExpiredLicenses().catch(console.error); // Run immediately on start
+    setInterval(() => {
+      checkAndMarkExpiredLicenses().catch(console.error);
+    }, 60 * 60 * 1000); // Every 1 hour
+
     server.listen(PORT, '0.0.0.0', () => {
       console.log(`==================================================`);
       console.log(` AssetIQ REST & Socket Server Running on http://localhost:${PORT}`);
