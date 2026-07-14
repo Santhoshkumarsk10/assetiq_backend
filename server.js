@@ -470,6 +470,139 @@ async function runAutoMigrations() {
       console.log('[MIGRATION] License permissions seeded and assigned to roles.');
     }
 
+    // 10. Seed sample software licenses if table is empty
+    const { SoftwareLicense } = require('./src/models');
+    const licenseCount = await SoftwareLicense.count();
+    if (licenseCount === 0) {
+      console.log('[MIGRATION] Seeding sample software licenses...');
+      await queryInterface.bulkInsert('software_licenses', [
+        // Active licenses – assigned to Location Admin users
+        {
+          software_name: 'Microsoft Office 365',
+          license_key: 'MOFF-365A-XK91-PRO2-2024',
+          valid_from: '2024-01-01',
+          valid_until: '2026-12-31',
+          assigned_user_id: 2, // Chennai Admin
+          status: 'active',
+          notes: 'Enterprise subscription — 50 seats. Includes Word, Excel, PowerPoint, Teams.',
+          created_at: new Date(), updated_at: new Date()
+        },
+        {
+          software_name: 'Adobe Creative Cloud',
+          license_key: 'ADCC-CREC-7X2M-ENT5-2025',
+          valid_from: '2025-01-15',
+          valid_until: '2026-01-14',
+          assigned_user_id: 3, // Mumbai Admin
+          status: 'active',
+          notes: 'All-apps plan. Includes Photoshop, Illustrator, InDesign, Premiere Pro.',
+          created_at: new Date(), updated_at: new Date()
+        },
+        {
+          software_name: 'Slack Business+',
+          license_key: 'SLCK-BIZ+-4RT9-MNQ1-2025',
+          valid_from: '2025-03-01',
+          valid_until: '2026-02-28',
+          assigned_user_id: 4, // DIFC Admin
+          status: 'active',
+          notes: 'Business+ plan — 25 users. Includes unlimited message history and advanced workflows.',
+          created_at: new Date(), updated_at: new Date()
+        },
+        {
+          software_name: 'Zoom Business',
+          license_key: 'ZOOM-BIZ2-9PL7-KWR3-2025',
+          valid_from: '2025-02-01',
+          valid_until: '2026-01-31',
+          assigned_user_id: 5, // Kenya Admin
+          status: 'active',
+          notes: '10-host license. Includes cloud recording, webinar add-on, and SSO.',
+          created_at: new Date(), updated_at: new Date()
+        },
+        {
+          software_name: 'AutoCAD 2025',
+          license_key: 'ACAD-2025-LTM1-SUB9-ADESK',
+          valid_from: '2025-04-01',
+          valid_until: '2026-03-31',
+          assigned_user_id: 6, // KL Malaysia Admin
+          status: 'active',
+          notes: 'Single-user named license. Annual subscription via Autodesk account.',
+          created_at: new Date(), updated_at: new Date()
+        },
+        // Available (unassigned) licenses
+        {
+          software_name: 'JetBrains IntelliJ IDEA',
+          license_key: 'JBIJ-IDEA-ENT7-FLT2-2025',
+          valid_from: '2025-06-01',
+          valid_until: '2026-05-31',
+          assigned_user_id: null,
+          status: 'available',
+          notes: 'Floating license — 5 concurrent users. Covers IntelliJ, PyCharm, WebStorm.',
+          created_at: new Date(), updated_at: new Date()
+        },
+        {
+          software_name: 'Figma Organization',
+          license_key: 'FGMA-ORG9-D5HY-2K3X-2025',
+          valid_from: '2025-05-10',
+          valid_until: '2026-05-09',
+          assigned_user_id: null,
+          status: 'available',
+          notes: 'Organization plan — unlimited editors & viewers. Includes branching and analytics.',
+          created_at: new Date(), updated_at: new Date()
+        },
+        {
+          software_name: 'GitHub Enterprise',
+          license_key: 'GHUB-ENT-CLD-4VW8-ORG1',
+          valid_from: '2025-01-01',
+          valid_until: '2025-12-31',
+          assigned_user_id: null,
+          status: 'available',
+          notes: 'Cloud-hosted plan — 100 developer seats. Includes advanced security and audit log streaming.',
+          created_at: new Date(), updated_at: new Date()
+        },
+        // Expired licenses – for testing renewal workflow
+        {
+          software_name: 'Kaspersky Endpoint Security',
+          license_key: 'KASP-ENDP-SEC3-XP01-2023',
+          valid_from: '2023-01-01',
+          valid_until: '2024-12-31',
+          assigned_user_id: 7, // Labuan Malaysia Admin
+          status: 'expired',
+          notes: 'Endpoint protection — 30 devices. Annual renewal required.',
+          created_at: new Date(), updated_at: new Date()
+        },
+        {
+          software_name: 'Salesforce CRM Professional',
+          license_key: 'SFDC-PRO-CRM-7TZ2-2024',
+          valid_from: '2024-01-01',
+          valid_until: '2024-12-31',
+          assigned_user_id: 8, // London Admin
+          status: 'expired',
+          notes: 'Professional edition — 10 users. Includes Sales Cloud, reports, and mobile app.',
+          created_at: new Date(), updated_at: new Date()
+        },
+        {
+          software_name: 'Tableau Creator',
+          license_key: 'TABL-CRT-2022-LN5X-ANLT',
+          valid_from: '2022-06-01',
+          valid_until: '2024-05-31',
+          assigned_user_id: 2, // Chennai Admin
+          status: 'expired',
+          notes: 'Data visualisation suite. Requires renewal to restore Tableau Server access.',
+          created_at: new Date(), updated_at: new Date()
+        },
+        {
+          software_name: 'Sophos Intercept X',
+          license_key: 'SOPH-INTX-ADV-8MR4-2023',
+          valid_from: '2023-03-01',
+          valid_until: '2024-02-29',
+          assigned_user_id: null,
+          status: 'expired',
+          notes: 'Advanced endpoint protection. Unassigned — requires reactivation and user assignment.',
+          created_at: new Date(), updated_at: new Date()
+        },
+      ]);
+      console.log('[MIGRATION] Sample software licenses seeded (12 records).');
+    }
+
   } catch (error) {
     console.error('[MIGRATION ERROR] Failed to run auto-migrations:', error.message);
   }
