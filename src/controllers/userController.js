@@ -588,6 +588,14 @@ async function listManagers(req, res) {
       where: {
         status: 'active'
       },
+      include: [
+        {
+          model: Role,
+          as: 'role',
+          where: { name: 'Location Admin' },
+          attributes: []
+        }
+      ],
       attributes: ['id', 'name', 'email', 'designation'],
       order: [['name', 'ASC']]
     });
