@@ -15,7 +15,7 @@ const transporter = nodemailer.createTransport({
 });
 
 async function sendEmail({ to, subject, html }) {
-  const fromName = process.env.MAIL_FROM_NAME || 'AssetIQ Team';
+  const fromName = process.env.MAIL_FROM_NAME || 'Aux AssetCare Team';
   const fromAddress = process.env.MAIL_FROM_ADDRESS || 'noreply@assetiq.com';
   
   const mailOptions = {

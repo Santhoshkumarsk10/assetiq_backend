@@ -10,6 +10,9 @@ const assetRoutes = require('./assets');
 const onboardingRoutes = require('./onboarding');
 const emailRequestsRoutes = require('./emailRequests');
 const rolesRoutes = require('./roles');
+const licenseRoutes = require('./license');
+const notificationsRoutes = require('./notifications');
+const ticketRoutes = require('./tickets');
 
 // Mount routes
 router.use('/auth', authRoutes);
@@ -19,6 +22,9 @@ router.use('/users', userRoutes);
 router.use('/assets', assetRoutes);
 router.use('/onboarding', onboardingRoutes);
 router.use('/email-requests', emailRequestsRoutes);
+router.use('/licenses', licenseRoutes);
+router.use('/notifications', notificationsRoutes);
+router.use('/tickets', ticketRoutes);
 router.use('/', rolesRoutes);
 
 module.exports = router;

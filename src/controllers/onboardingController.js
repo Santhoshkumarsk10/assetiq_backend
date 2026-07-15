@@ -103,6 +103,7 @@ async function getOnboarding(req, res) {
       include: [
         { model: Location, as: 'location' },
         { model: Asset, as: 'assets' },
+        { model: User, as: 'reportingManager', attributes: ['id', 'name', 'email'] },
         { model: EmailCreationRequest, as: 'emailRequest', include: [{ model: User, as: 'processor', attributes: ['id', 'name'] }] },
         { model: OnboardingApproval, as: 'approval', include: [{ model: User, as: 'approver', attributes: ['id', 'name'] }] }
       ]
@@ -212,7 +213,7 @@ async function getNextEmployeeCode(req, res) {
  * Step 1: Create Onboarding Wizard Draft
  */
 async function step1(req, res) {
-  const { employee_id, name, personal_email, phone, department, designation, location_id, state, city, address } = req.body;
+  const { employee_id, name, personal_email, phone, department, designation, location_id, state, city, address, reporting_manager_id } = req.body;
   const isLocationAdmin = req.user.role_name === 'Location Admin';
   const myLocId = req.user.location_id;
 
@@ -263,6 +264,7 @@ async function step1(req, res) {
       state,
       city,
       address,
+      reporting_manager_id: reporting_manager_id || null,
       step: 2,
       status: 'pending_assets',
       created_by: req.user.id
@@ -576,6 +578,7 @@ async function step5(req, res) {
         state: request.state,
         city: request.city,
         address: request.address,
+        reporting_manager_id: request.reporting_manager_id,
         status: 'active'
       }, { transaction: t });
 
@@ -850,7 +853,7 @@ async function processEmailRequest(req, res) {
             </div>
             
             <p style="color: #64748b; font-size: 12px; border-top: 1px solid #e2e8f0; padding-top: 15px; margin-bottom: 0;">
-              This is an automated request from the AssetIQ Onboarding System.
+              This is an automated request from the Aux AssetCare Onboarding System.
             </p>
           </div>
         `;
