@@ -54,6 +54,9 @@ app.use((req, res, next) => {
           if (path.includes('/licenses')) {
             io.emit('license_change');
           }
+          if (path.includes('/tickets')) {
+            io.emit('ticket_change');
+          }
         }, 50);
       }
     }
@@ -75,6 +78,9 @@ app.use((req, res, next) => {
           }
           if (path.includes('/licenses')) {
             io.emit('license_change');
+          }
+          if (path.includes('/tickets')) {
+            io.emit('ticket_change');
           }
         }, 50);
       }
@@ -601,6 +607,80 @@ async function runAutoMigrations() {
         },
       ]);
       console.log('[MIGRATION] Sample software licenses seeded (12 records).');
+    }
+
+    // 11. Create tickets table if missing
+    const currentTables = await queryInterface.showAllTables();
+    if (!currentTables.includes('tickets')) {
+      console.log('[MIGRATION] Creating tickets table...');
+      await queryInterface.createTable('tickets', {
+        id: { type: sequelize.Sequelize.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
+        ticket_no: { type: sequelize.Sequelize.STRING(50), unique: true, allowNull: false },
+        location_id: { type: sequelize.Sequelize.INTEGER, allowNull: false, references: { model: 'locations', key: 'id' }, onUpdate: 'CASCADE', onDelete: 'CASCADE' },
+        asset_id: { type: sequelize.Sequelize.INTEGER, allowNull: true, references: { model: 'assets', key: 'id' }, onUpdate: 'CASCADE', onDelete: 'SET NULL' },
+        user_id: { type: sequelize.Sequelize.INTEGER, allowNull: false, references: { model: 'users', key: 'id' }, onUpdate: 'CASCADE', onDelete: 'CASCADE' },
+        raised_by: { type: sequelize.Sequelize.INTEGER, allowNull: false, references: { model: 'users', key: 'id' }, onUpdate: 'CASCADE', onDelete: 'CASCADE' },
+        title: { type: sequelize.Sequelize.STRING(255), allowNull: false },
+        description: { type: sequelize.Sequelize.TEXT, allowNull: false },
+        category: { type: sequelize.Sequelize.ENUM('hardware_malfunction', 'software_issue', 'lost_stolen', 'physical_damage', 'general_it'), allowNull: false },
+        priority: { type: sequelize.Sequelize.ENUM('low', 'medium', 'high', 'critical'), defaultValue: 'medium', allowNull: false },
+        status: { type: sequelize.Sequelize.ENUM('pending', 'in_progress', 'resolved', 'closed', 'cancelled'), defaultValue: 'pending', allowNull: false },
+        assigned_to: { type: sequelize.Sequelize.INTEGER, allowNull: true, references: { model: 'users', key: 'id' }, onUpdate: 'CASCADE', onDelete: 'SET NULL' },
+        resolution_type: { type: sequelize.Sequelize.ENUM('repaired', 'replaced', 'retired', 'no_issue_found', 'rejected'), allowNull: true },
+        resolution_notes: { type: sequelize.Sequelize.TEXT, allowNull: true },
+        created_at: { type: sequelize.Sequelize.DATE, allowNull: false, defaultValue: sequelize.Sequelize.literal('CURRENT_TIMESTAMP') },
+        updated_at: { type: sequelize.Sequelize.DATE, allowNull: false, defaultValue: sequelize.Sequelize.literal('CURRENT_TIMESTAMP') }
+      });
+      console.log('[MIGRATION] tickets table created.');
+    }
+
+    // 12. Create ticket_comments table if missing
+    const tablesAfterTickets = await queryInterface.showAllTables();
+    if (!tablesAfterTickets.includes('ticket_comments')) {
+      console.log('[MIGRATION] Creating ticket_comments table...');
+      await queryInterface.createTable('ticket_comments', {
+        id: { type: sequelize.Sequelize.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
+        ticket_id: { type: sequelize.Sequelize.INTEGER, allowNull: false, references: { model: 'tickets', key: 'id' }, onUpdate: 'CASCADE', onDelete: 'CASCADE' },
+        user_id: { type: sequelize.Sequelize.INTEGER, allowNull: false, references: { model: 'users', key: 'id' }, onUpdate: 'CASCADE', onDelete: 'CASCADE' },
+        type: { type: sequelize.Sequelize.ENUM('comment', 'status_change', 'assignment', 'resolution'), defaultValue: 'comment', allowNull: false },
+        message: { type: sequelize.Sequelize.TEXT, allowNull: false },
+        metadata: { type: sequelize.Sequelize.JSON, allowNull: true },
+        created_at: { type: sequelize.Sequelize.DATE, allowNull: false, defaultValue: sequelize.Sequelize.literal('CURRENT_TIMESTAMP') },
+        updated_at: { type: sequelize.Sequelize.DATE, allowNull: false, defaultValue: sequelize.Sequelize.literal('CURRENT_TIMESTAMP') }
+      });
+      console.log('[MIGRATION] ticket_comments table created.');
+    }
+
+    // 13. Seed ticket permissions if not already present
+    const existingTicketPerm = await Permission.findOne({ where: { name: 'ticket.list' } });
+    if (!existingTicketPerm) {
+      console.log('[MIGRATION] Seeding ticket permissions...');
+      const ticketPerms = [
+        { id: 39, name: 'ticket.list', description: 'View tickets' },
+        { id: 40, name: 'ticket.add',  description: 'Raise tickets' },
+        { id: 41, name: 'ticket.edit', description: 'Assign, resolve, close, cancel tickets' },
+      ];
+      for (const p of ticketPerms) {
+        await queryInterface.bulkInsert('permissions', [{ ...p, created_at: new Date(), updated_at: new Date() }]).catch(() => {});
+      }
+
+      const superAdminRole = await Role.findOne({ where: { name: 'Super Admin' } });
+      const adminRole      = await Role.findOne({ where: { name: 'Admin' } });
+      const locAdminRole   = await Role.findOne({ where: { name: 'Location Admin' } });
+      const userRole       = await Role.findOne({ where: { name: 'User' } });
+
+      const assignPerms = async (roleId, permIds) => {
+        for (const pid of permIds) {
+          await queryInterface.bulkInsert('role_permissions', [{ role_id: roleId, permission_id: pid }]).catch(() => {});
+        }
+      };
+
+      if (superAdminRole) await assignPerms(superAdminRole.id, [39, 40, 41]);
+      if (adminRole)      await assignPerms(adminRole.id,      [39, 40, 41]);
+      if (locAdminRole)   await assignPerms(locAdminRole.id,   [39, 40, 41]);
+      if (userRole)       await assignPerms(userRole.id,       [39, 40]);
+
+      console.log('[MIGRATION] Ticket permissions seeded and assigned to roles.');
     }
 
   } catch (error) {
