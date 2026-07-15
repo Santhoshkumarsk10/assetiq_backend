@@ -93,7 +93,7 @@ async function login(req, res) {
       if (!user.mfa_secret) {
         // Needs initial setup
         const secret = authenticator.generateSecret();
-        const keyuri = authenticator.keyuri(user.email, 'AssetIQ', secret);
+        const keyuri = authenticator.keyuri(user.email, 'Aux AssetCare', secret);
         const qrCode = await qrcode.toDataURL(keyuri);
         return res.json({
           mfaRequired: true,
@@ -355,8 +355,8 @@ async function forgotPassword(req, res) {
 
     const mailHtml = `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
-        <h2 style="color: #0f172a;">Reset Your AssetIQ Password</h2>
-        <p style="color: #475569;">You are receiving this email because you requested a password reset for your AssetIQ account.</p>
+        <h2 style="color: #0f172a;">Reset Your Aux AssetCare Password</h2>
+        <p style="color: #475569;">You are receiving this email because you requested a password reset for your Aux AssetCare account.</p>
         <p style="color: #475569;">Click the button below to reset your password. This link is valid for 1 hour.</p>
         <div style="margin: 24px 0;">
           <a href="${resetUrl}" style="background-color: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Reset Password</a>
@@ -367,7 +367,7 @@ async function forgotPassword(req, res) {
 
     await sendEmail({
       to: user.email,
-      subject: 'AssetIQ Password Reset Request',
+      subject: 'Aux AssetCare Password Reset Request',
       html: mailHtml
     });
 

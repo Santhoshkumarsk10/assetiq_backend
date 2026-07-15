@@ -626,7 +626,7 @@ async function startServer() {
 
     server.listen(PORT, '0.0.0.0', () => {
       console.log(`==================================================`);
-      console.log(` AssetIQ REST & Socket Server Running on http://localhost:${PORT}`);
+      console.log(` Aux AssetCare REST & Socket Server Running on http://localhost:${PORT}`);
       console.log(` Mode: ${process.env.NODE_ENV || 'development'}`);
       console.log(` Database Host: ${process.env.DB_HOST || '127.0.0.1'}`);
       console.log(`==================================================`);

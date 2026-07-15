@@ -103,7 +103,7 @@ async function checkAndMarkExpiredLicenses() {
                 <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Expired On</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; color: #dc2626;">${license.valid_until}</td></tr>
                 ${license.user ? `<tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Assigned User</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.user.name} (${license.user.email})</td></tr>` : ''}
               </table>
-              <p style="margin-top: 16px;">Please log in to <strong>AssetIQ</strong> and submit a renewal request for this license.</p>
+              <p style="margin-top: 16px;">Please log in to <strong>Aux AssetCare</strong> and submit a renewal request for this license.</p>
             </div>
           `
         }).catch(() => {});
@@ -425,7 +425,7 @@ async function submitRenewalRequest(req, res) {
               ${proposed_valid_until ? `<tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Proposed New Validity</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${proposed_valid_until}</td></tr>` : ''}
               ${renewal_notes ? `<tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Notes</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${renewal_notes}</td></tr>` : ''}
             </table>
-            <p style="margin-top: 16px;">Please log in to <strong>AssetIQ</strong> to review this request.</p>
+            <p style="margin-top: 16px;">Please log in to <strong>Aux AssetCare</strong> to review this request.</p>
           </div>
         `
       }).catch(() => {});

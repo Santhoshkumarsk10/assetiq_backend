@@ -853,7 +853,7 @@ async function processEmailRequest(req, res) {
             </div>
             
             <p style="color: #64748b; font-size: 12px; border-top: 1px solid #e2e8f0; padding-top: 15px; margin-bottom: 0;">
-              This is an automated request from the AssetIQ Onboarding System.
+              This is an automated request from the Aux AssetCare Onboarding System.
             </p>
           </div>
         `;
