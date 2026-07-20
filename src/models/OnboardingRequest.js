@@ -64,6 +64,14 @@ const OnboardingRequest = sequelize.define('OnboardingRequest', {
   reporting_manager_id: {
     type: DataTypes.INTEGER,
     allowNull: true
+  },
+  role_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true
+  },
+  general_manager_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true
   }
 }, {
   timestamps: true,
@@ -74,7 +82,9 @@ const OnboardingRequest = sequelize.define('OnboardingRequest', {
 OnboardingRequest.associate = (models) => {
   OnboardingRequest.belongsTo(models.Location, { foreignKey: 'location_id', as: 'location' });
   OnboardingRequest.belongsTo(models.User, { foreignKey: 'created_by', as: 'creator' });
+  OnboardingRequest.belongsTo(models.Role, { foreignKey: 'role_id', as: 'role' });
   OnboardingRequest.belongsTo(models.User, { foreignKey: 'reporting_manager_id', as: 'reportingManager' });
+  OnboardingRequest.belongsTo(models.User, { foreignKey: 'general_manager_id', as: 'generalManager' });
   OnboardingRequest.belongsToMany(models.Asset, {
     through: 'onboarding_assets',
     foreignKey: 'onboarding_id',

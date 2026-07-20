@@ -22,7 +22,8 @@ async function listUsers(req, res) {
       include: [
         { model: Role, as: 'role' },
         { model: Location, as: 'location' },
-        { model: User, as: 'reportingManager', attributes: ['id', 'name', 'email'] }
+        { model: User, as: 'reportingManager', attributes: ['id', 'name', 'email'] },
+        { model: User, as: 'generalManager', attributes: ['id', 'name', 'email'] }
       ],
       order: [['name', 'ASC']]
     };
@@ -97,7 +98,7 @@ async function listUsers(req, res) {
  * Add User
  */
 async function addUser(req, res) {
-  const { employee_id, name, email, phone, password, role_id, location_id, department, designation, reporting_manager_id } = req.body;
+  const { employee_id, name, email, phone, password, role_id, location_id, department, designation, reporting_manager_id, general_manager_id } = req.body;
   const isLocationAdmin = req.user.role_name === 'Location Admin';
   const myLocId = req.user.location_id;
 
@@ -135,6 +136,9 @@ async function addUser(req, res) {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    const isSelfReporting = reporting_manager_id === 'self';
+    const parsedReportingManagerId = isSelfReporting ? null : (reporting_manager_id || null);
+
     const newUser = await User.create({
       employee_id: employee_id || null,
       name,
@@ -145,9 +149,15 @@ async function addUser(req, res) {
       location_id: targetLocId,
       department: department || null,
       designation: designation || null,
-      reporting_manager_id: reporting_manager_id || null,
+      reporting_manager_id: parsedReportingManagerId,
+      general_manager_id: general_manager_id || null,
       status: 'active'
     });
+
+    if (isSelfReporting || (!reporting_manager_id && parseInt(role_id) === 3)) {
+      newUser.reporting_manager_id = newUser.id;
+      await newUser.save();
+    }
 
     await logAction({
       userId: req.user.id,
@@ -177,7 +187,7 @@ async function addUser(req, res) {
  */
 async function editUser(req, res) {
   const id = req.body.id || req.params.id;
-  const { employee_id, name, email, phone, password, role_id, location_id, department, designation, status, reporting_manager_id } = req.body;
+  const { employee_id, name, email, phone, password, role_id, location_id, department, designation, status, reporting_manager_id, general_manager_id } = req.body;
   const isLocationAdmin = req.user.role_name === 'Location Admin';
   const myLocId = req.user.location_id;
 
@@ -218,7 +228,16 @@ async function editUser(req, res) {
     user.department = department !== undefined ? department : user.department;
     user.designation = designation !== undefined ? designation : user.designation;
     user.status = status || user.status;
-    user.reporting_manager_id = reporting_manager_id !== undefined ? (reporting_manager_id || null) : user.reporting_manager_id;
+    
+    if (reporting_manager_id === 'self') {
+      user.reporting_manager_id = user.id;
+    } else if (reporting_manager_id !== undefined) {
+      user.reporting_manager_id = reporting_manager_id || null;
+    }
+
+    if (general_manager_id !== undefined) {
+      user.general_manager_id = general_manager_id || null;
+    }
 
     if (!isLocationAdmin) {
       user.role_id = role_id || user.role_id;
@@ -592,11 +611,10 @@ async function listManagers(req, res) {
         {
           model: Role,
           as: 'role',
-          where: { name: 'Location Admin' },
-          attributes: []
+          attributes: ['id', 'name']
         }
       ],
-      attributes: ['id', 'name', 'email', 'designation'],
+      attributes: ['id', 'name', 'email', 'designation', 'location_id', 'role_id'],
       order: [['name', 'ASC']]
     });
     return res.json({ success: true, managers });

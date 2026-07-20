@@ -83,6 +83,10 @@ const User = sequelize.define('User', {
   reporting_manager_id: {
     type: DataTypes.INTEGER,
     allowNull: true
+  },
+  general_manager_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true
   }
 }, {
   timestamps: true,
@@ -94,6 +98,7 @@ User.associate = (models) => {
   User.belongsTo(models.Role, { foreignKey: 'role_id', as: 'role' });
   User.belongsTo(models.Location, { foreignKey: 'location_id', as: 'location' });
   User.belongsTo(models.User, { foreignKey: 'reporting_manager_id', as: 'reportingManager' });
+  User.belongsTo(models.User, { foreignKey: 'general_manager_id', as: 'generalManager' });
   User.hasMany(models.User, { foreignKey: 'reporting_manager_id', as: 'reportees' });
   User.hasMany(models.AssetAllocation, { foreignKey: 'user_id', as: 'allocations' });
   User.hasMany(models.AssetAllocation, { foreignKey: 'allocated_by', as: 'allocationsMade' });

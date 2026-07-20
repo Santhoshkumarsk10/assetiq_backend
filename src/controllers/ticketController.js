@@ -1,4 +1,4 @@
-const { Ticket, TicketComment, Asset, AssetAllocation, User, Location, Notification } = require('../models');
+const { Ticket, TicketComment, Asset, AssetAllocation, User, Location, Notification, Role } = require('../models');
 const { logAction } = require('../utils/auditLogger');
 const { sendEmail } = require('../utils/mail');
 const { getIo } = require('../socket');
@@ -115,30 +115,30 @@ async function raiseTicket(req, res) {
 
     await logAction({ userId, action: 'TICKET_RAISE', entityType: 'Ticket', entityId: ticket.id, details: `Raised ticket ${ticketNo}: ${title}`, req });
 
-    // Notify location admins + super admins
+    // Notify location admins + IT Admins + Super Admin / Admin
     const adminsToNotify = await User.findAll({
-      where: {
-        status: 'active',
-        [Op.or]: [
-          { role_id: 1 }, // Super Admin
-          { role_id: 2 }, // Admin
-          { location_id: locationId, role_id: 3 } // Location Admin at same location
-        ]
-      }
+      where: { status: 'active' },
+      include: [{ model: Role, as: 'role' }]
     });
 
     for (const admin of adminsToNotify) {
       if (admin.id === userId) continue;
-      await sendTicketNotification({
-        userId: admin.id,
-        title: `New Ticket: ${ticketNo}`,
-        message: `${req.user.name} raised ticket "${title}" (${category}, ${priority || 'medium'} priority).`,
-        type: 'ticket_raised',
-        referenceId: ticket.id,
-        emailTo: admin.email,
-        emailSubject: `[Aux AssetCare] New Ticket ${ticketNo}: ${title}`,
-        emailHtml: `<p>Hi ${admin.name},</p><p><strong>${req.user.name}</strong> has raised a new support ticket.</p><p><strong>Ticket:</strong> ${ticketNo}<br/><strong>Title:</strong> ${title}<br/><strong>Category:</strong> ${category}<br/><strong>Priority:</strong> ${priority || 'medium'}</p><p><strong>Description:</strong><br/>${description}</p><p>Please log in to Aux AssetCare to review and assign this ticket.</p>`
-      });
+      const rName = admin.role ? admin.role.name : '';
+      const isLocationAdminOfUser = rName === 'Location Admin' && parseInt(admin.location_id) === parseInt(locationId);
+      const isITOrSuperAdmin = ['IT Admin', 'Admin', 'Super Admin'].includes(rName);
+
+      if (isLocationAdminOfUser || isITOrSuperAdmin) {
+        await sendTicketNotification({
+          userId: admin.id,
+          title: `New Ticket: ${ticketNo}`,
+          message: `${req.user.name} raised ticket "${title}" (${category}, ${priority || 'medium'} priority).`,
+          type: 'ticket_raised',
+          referenceId: ticket.id,
+          emailTo: admin.email,
+          emailSubject: `[Aux AssetCare] New Ticket ${ticketNo}: ${title}`,
+          emailHtml: `<p>Hi ${admin.name},</p><p><strong>${req.user.name}</strong> has raised a new support ticket.</p><p><strong>Ticket:</strong> ${ticketNo}<br/><strong>Title:</strong> ${title}<br/><strong>Category:</strong> ${category}<br/><strong>Priority:</strong> ${priority || 'medium'}</p><p><strong>Description:</strong><br/>${description}</p><p>Please log in to Aux AssetCare to review and assign this ticket.</p>`
+        });
+      }
     }
 
     return res.status(201).json({ message: 'Ticket raised successfully.', ticket });
@@ -189,19 +189,18 @@ async function listTickets(req, res) {
       offset: parseInt(offset)
     });
 
-    // Also return admins list for assignment dropdown (only for admin roles)
+    // Also return IT Admins / Admins list for assignment dropdown
     let admins = [];
-    if (['Super Admin', 'Admin', 'Location Admin'].includes(roleName)) {
-      const adminWhere = { status: 'active' };
-      if (roleName === 'Location Admin') {
-        adminWhere[Op.or] = [
-          { role_id: 1 }, { role_id: 2 },
-          { location_id: req.user.location_id, role_id: 3 }
-        ];
-      } else {
-        adminWhere.role_id = { [Op.in]: [1, 2, 3] };
-      }
-      admins = await User.findAll({ where: adminWhere, attributes: ['id', 'name', 'email'] });
+    if (['Super Admin', 'Admin', 'Location Admin', 'IT Admin'].includes(roleName)) {
+      admins = await User.findAll({
+        where: { status: 'active' },
+        include: [{
+          model: Role,
+          as: 'role',
+          where: { name: ['IT Admin', 'Admin', 'Super Admin'] }
+        }],
+        attributes: ['id', 'name', 'email']
+      });
     }
 
     return res.json({
@@ -272,6 +271,14 @@ async function assignTicket(req, res) {
   try {
     const ticket = await Ticket.findByPk(id);
     if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
+    const roleName = req.user.role_name;
+    if (roleName === 'IT Admin') {
+      return res.status(403).json({ error: 'IT Admins cannot assign tickets; assignment must be performed by the Location Admin.' });
+    }
+    if (roleName === 'Location Admin' && parseInt(ticket.location_id) !== parseInt(req.user.location_id)) {
+      return res.status(403).json({ error: 'Location Admins can only assign tickets belonging to their location.' });
+    }
+
     if (!['pending', 'in_progress'].includes(ticket.status)) {
       return res.status(400).json({ error: 'Ticket cannot be assigned in its current status.' });
     }
@@ -321,6 +328,19 @@ async function resolveTicket(req, res) {
       include: [{ model: User, as: 'user', attributes: ['id', 'name', 'email'] }]
     });
     if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
+    const roleName = req.user.role_name;
+    if (roleName === 'Location Admin') {
+      return res.status(403).json({ error: 'Location Admins cannot resolve tickets directly. Tickets must be assigned to an IT Admin.' });
+    }
+    if (roleName === 'IT Admin') {
+      if (!ticket.assigned_to) {
+        return res.status(403).json({ error: 'IT Admin cannot take action until the ticket is assigned by the Location Admin.' });
+      }
+      if (parseInt(ticket.assigned_to) !== parseInt(req.user.id)) {
+        return res.status(403).json({ error: 'You can only resolve tickets that are assigned to you.' });
+      }
+    }
+
     if (ticket.status !== 'in_progress') {
       return res.status(400).json({ error: 'Only in-progress tickets can be resolved.' });
     }
@@ -409,10 +429,18 @@ async function closeTicket(req, res) {
     if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
 
     const roleName = req.user.role_name;
-    // Regular users can only close their own resolved tickets
     if (roleName === 'User') {
       if (ticket.user_id !== req.user.id) return res.status(403).json({ error: 'You can only close your own tickets.' });
       if (ticket.status !== 'resolved') return res.status(400).json({ error: 'You can only close tickets that have been resolved.' });
+    } else if (roleName === 'Location Admin') {
+      return res.status(403).json({ error: 'Location Admins cannot close tickets directly. Tickets must be assigned to and handled by an IT Admin.' });
+    } else if (roleName === 'IT Admin') {
+      if (!ticket.assigned_to) {
+        return res.status(403).json({ error: 'IT Admin cannot take action until the ticket is assigned by the Location Admin.' });
+      }
+      if (parseInt(ticket.assigned_to) !== parseInt(req.user.id) && !['Super Admin', 'Admin'].includes(roleName)) {
+        return res.status(403).json({ error: 'You can only close tickets assigned to you.' });
+      }
     } else {
       if (!['resolved', 'in_progress', 'pending'].includes(ticket.status)) {
         return res.status(400).json({ error: 'Ticket cannot be closed in its current status.' });
@@ -458,6 +486,10 @@ async function cancelTicket(req, res) {
       include: [{ model: User, as: 'user', attributes: ['id', 'name', 'email'] }]
     });
     if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
+    const roleName = req.user.role_name;
+    if (roleName === 'IT Admin' && !ticket.assigned_to) {
+      return res.status(403).json({ error: 'IT Admin cannot cancel tickets until assigned by the Location Admin.' });
+    }
     if (['closed', 'cancelled'].includes(ticket.status)) {
       return res.status(400).json({ error: 'Ticket is already closed or cancelled.' });
     }

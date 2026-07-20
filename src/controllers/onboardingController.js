@@ -1,4 +1,4 @@
-const { OnboardingRequest, Asset, EmailCreationRequest, OnboardingApproval, User, Location, AssetAllocation } = require('../models');
+const { OnboardingRequest, Asset, EmailCreationRequest, OnboardingApproval, User, Location, AssetAllocation, Role } = require('../models');
 const { logAction } = require('../utils/auditLogger');
 const { sendEmail } = require('../utils/mail');
 const { hasLocationAccess } = require('../middleware/rbacMiddleware');
@@ -21,11 +21,32 @@ async function listOnboarding(req, res) {
     const status = req.body.status;
 
     let queryOptions = {
+      order: [['created_at', 'DESC']],
       include: [
-        { model: Location, as: 'location' },
-        { model: User, as: 'creator', attributes: ['id', 'name', 'email'] }
-      ],
-      order: [['created_at', 'DESC']]
+        {
+          model: Location,
+          as: 'location'
+        },
+        {
+          model: Role,
+          as: 'role',
+          attributes: ['id', 'name']
+        },
+        {
+          model: User,
+          as: 'reportingManager',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: User,
+          as: 'generalManager',
+          attributes: ['id', 'name', 'email']
+        },
+        {
+          model: EmailCreationRequest,
+          as: 'emailRequest'
+        }
+      ]
     };
 
     const { Op } = OnboardingRequest.sequelize.Sequelize;
@@ -70,9 +91,12 @@ async function listOnboarding(req, res) {
       locations = await Location.findAll({ order: [['name', 'ASC']] });
     }
 
+    const roles = await Role.findAll({ order: [['name', 'ASC']] });
+
     return res.json({
       requests,
       locations,
+      roles,
       pagination: paginate ? {
         page,
         limit,
@@ -102,8 +126,10 @@ async function getOnboarding(req, res) {
     const request = await OnboardingRequest.findByPk(id, {
       include: [
         { model: Location, as: 'location' },
+        { model: Role, as: 'role' },
         { model: Asset, as: 'assets' },
         { model: User, as: 'reportingManager', attributes: ['id', 'name', 'email'] },
+        { model: User, as: 'generalManager', attributes: ['id', 'name', 'email'] },
         { model: EmailCreationRequest, as: 'emailRequest', include: [{ model: User, as: 'processor', attributes: ['id', 'name'] }] },
         { model: OnboardingApproval, as: 'approval', include: [{ model: User, as: 'approver', attributes: ['id', 'name'] }] }
       ]
@@ -213,7 +239,7 @@ async function getNextEmployeeCode(req, res) {
  * Step 1: Create Onboarding Wizard Draft
  */
 async function step1(req, res) {
-  const { employee_id, name, personal_email, phone, department, designation, location_id, state, city, address, reporting_manager_id } = req.body;
+  const { employee_id, name, personal_email, phone, department, designation, location_id, state, city, address, reporting_manager_id, role_id, general_manager_id } = req.body;
   const isLocationAdmin = req.user.role_name === 'Location Admin';
   const myLocId = req.user.location_id;
 
@@ -264,7 +290,9 @@ async function step1(req, res) {
       state,
       city,
       address,
+      role_id: role_id || null,
       reporting_manager_id: reporting_manager_id || null,
+      general_manager_id: general_manager_id || null,
       step: 2,
       status: 'pending_assets',
       created_by: req.user.id
@@ -562,6 +590,9 @@ async function step5(req, res) {
     const sha256Password = crypto.createHash('sha256').update(plainPassword).digest('hex');
     const hashedPassword = await bcrypt.hash(sha256Password, 10);
 
+    const isSelfReporting = request.reporting_manager_id === 'self';
+    const parsedReportingManagerId = isSelfReporting ? null : (request.reporting_manager_id || null);
+
     // Run transaction: user creation, asset status changes, asset_allocations logs
     await OnboardingRequest.sequelize.transaction(async (t) => {
       // 1. Create active User
@@ -571,16 +602,22 @@ async function step5(req, res) {
         email: officialEmail,
         phone: request.phone,
         password: hashedPassword,
-        role_id: 4, // regular User role
+        role_id: request.role_id || 4,
         location_id: request.location_id,
         department: request.department,
         designation: request.designation,
         state: request.state,
         city: request.city,
         address: request.address,
-        reporting_manager_id: request.reporting_manager_id,
+        reporting_manager_id: parsedReportingManagerId,
+        general_manager_id: request.general_manager_id || null,
         status: 'active'
       }, { transaction: t });
+
+      if (isSelfReporting || (!request.reporting_manager_id && request.role_id === 3)) {
+        newUser.reporting_manager_id = newUser.id;
+        await newUser.save({ transaction: t });
+      }
 
       // 2. Allocate the staging assets
       if (request.assets && request.assets.length > 0) {
