@@ -72,6 +72,12 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING(255),
     allowNull: true
   },
+  mfa_pending_secret: {
+    type: DataTypes.STRING(255),
+    allowNull: true
+    // Temporary storage for TOTP secret during first-time setup.
+    // Cleared after the user successfully verifies the first OTP.
+  },
   reset_token: {
     type: DataTypes.STRING(255),
     allowNull: true

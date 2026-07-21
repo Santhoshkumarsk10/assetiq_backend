@@ -4,11 +4,9 @@ async function logAction({ userId, action, entityType, entityId, details, req })
   try {
     let ipAddress = '127.0.0.1';
     if (req) {
-      ipAddress = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
-      // Clean up local IPv6 representation if present
-      if (ipAddress === '::1') {
-        ipAddress = '127.0.0.1';
-      }
+      // req.ip honours the Express 'trust proxy' setting, preventing X-Forwarded-For spoofing
+      ipAddress = req.ip || req.socket.remoteAddress || '127.0.0.1';
+      if (ipAddress === '::1') ipAddress = '127.0.0.1';
     }
 
     await AuditLog.create({

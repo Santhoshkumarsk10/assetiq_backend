@@ -15,8 +15,10 @@ const {
 } = require('../utils/validators');
 require('dotenv').config();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'assetiq-super-secret-jwt-key-2026!@#';
-const JWT_EXPIRY = process.env.JWT_EXPIRY || '15m';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) throw new Error('[FATAL] JWT_SECRET env var is not set');
+const JWT_EXPIRY = process.env.JWT_EXPIRY || '8h';
+
 
 function getExpiryMs(expiryStr) {
   const match = String(expiryStr).match(/^(\d+)([smhd])$/i);
@@ -86,24 +88,29 @@ async function login(req, res) {
       return res.status(401).json({ error: 'Invalid login credentials.' });
     }
 
-    // Check if MFA is enabled
+    // MFA is enabled — issue a short-lived tempToken
     if (user.mfa_enabled) {
       const tempToken = jwt.sign({ id: user.id, mfaPending: true }, JWT_SECRET, { expiresIn: '5m' });
-      
+
       if (!user.mfa_secret) {
-        // Needs initial setup
+        // First-time MFA setup: generate a TOTP secret, persist it as pending in DB
         const secret = authenticator.generateSecret();
         const keyuri = authenticator.keyuri(user.email, 'Aux AssetCare', secret);
         const qrCode = await qrcode.toDataURL(keyuri);
+
+        // Store as pending — will be committed once the user verifies the first OTP
+        user.mfa_pending_secret = secret;
+        await user.save();
+
         return res.json({
           mfaRequired: true,
           mfaSetup: true,
           qrCode,
-          secret,
+          // NOTE: secret is NOT sent to the client — it is fetched from DB during verification
           tempToken
         });
       } else {
-        // Simple OTP verification prompt
+        // Existing MFA — just prompt for OTP
         return res.json({
           mfaRequired: true,
           mfaSetup: false,
@@ -112,26 +119,21 @@ async function login(req, res) {
       }
     }
 
-    // Prepare token payload
-    const permissions = user.role && user.role.permissions 
-      ? user.role.permissions.map(p => p.name) 
+    // Slim JWT payload — permissions re-loaded from DB on every request by authMiddleware
+    const permissions = user.role && user.role.permissions
+      ? user.role.permissions.map(p => p.name)
       : [];
 
-    const tokenPayload = {
-      id: user.id,
-      email: user.email,
-      role_name: user.role ? user.role.name : 'User',
-      location_id: user.location_id,
-      permissions
-    };
+    const tokenPayload = { id: user.id, email: user.email };
 
     // Sign JWT
     const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRY });
 
-    // Set cookie for browser sessions
+    // Set httpOnly cookie with strict SameSite
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
       maxAge: getExpiryMs(JWT_EXPIRY)
     });
 
@@ -184,7 +186,11 @@ async function logout(req, res) {
       });
     }
 
-    res.clearCookie('token');
+    res.clearCookie('token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict'
+    });
     return res.json({ message: 'Logout successful' });
   } catch (error) {
     console.error('Logout error:', error);
@@ -237,15 +243,15 @@ async function verifyMfa(req, res) {
       return res.status(403).json({ error: 'Your account is inactive. Please contact support.' });
     }
 
-    // Determine target secret
+    // H-03 Fix: Read the pending MFA secret from DB — never trust a client-supplied secret
     let secretToVerify = user.mfa_secret;
-    const isFirstSetup = !user.mfa_secret;
+    const isFirstSetup = !user.mfa_secret && !!user.mfa_pending_secret;
 
     if (isFirstSetup) {
-      if (!mfaSecret) {
-        return res.status(400).json({ error: 'MFA setup secret is missing.' });
+      if (!user.mfa_pending_secret) {
+        return res.status(400).json({ error: 'MFA setup session expired. Please log in again.' });
       }
-      secretToVerify = mfaSecret;
+      secretToVerify = user.mfa_pending_secret;
     }
 
     const isValid = authenticator.verify({ token: otp, secret: secretToVerify });
@@ -254,30 +260,27 @@ async function verifyMfa(req, res) {
     }
 
     if (isFirstSetup) {
-      user.mfa_secret = mfaSecret;
+      // Commit the pending secret as permanent and clear the pending one
+      user.mfa_secret = user.mfa_pending_secret;
+      user.mfa_pending_secret = null;
       await user.save();
     }
 
-    // Prepare token payload
-    const permissions = user.role && user.role.permissions 
-      ? user.role.permissions.map(p => p.name) 
+    // Slim JWT payload — permissions re-loaded from DB on every request by authMiddleware
+    const permissions = user.role && user.role.permissions
+      ? user.role.permissions.map(p => p.name)
       : [];
 
-    const tokenPayload = {
-      id: user.id,
-      email: user.email,
-      role_name: user.role ? user.role.name : 'User',
-      location_id: user.location_id,
-      permissions
-    };
+    const tokenPayload = { id: user.id, email: user.email };
 
     // Sign JWT
     const token = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: JWT_EXPIRY });
 
-    // Set cookie for browser sessions
+    // Set httpOnly cookie with strict SameSite
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
       maxAge: getExpiryMs(JWT_EXPIRY)
     });
 

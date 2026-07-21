@@ -49,6 +49,13 @@ async function runAutoMigrations() {
         allowNull: true
       });
     }
+    if (!userTableInfo.mfa_pending_secret) {
+      console.log('[MIGRATION] Adding mfa_pending_secret column to users...');
+      await queryInterface.addColumn('users', 'mfa_pending_secret', {
+        type: sequelize.Sequelize.STRING(255),
+        allowNull: true
+      });
+    }
     if (!userTableInfo.reset_token) {
       console.log('[MIGRATION] Adding reset_token column to users...');
       await queryInterface.addColumn('users', 'reset_token', {

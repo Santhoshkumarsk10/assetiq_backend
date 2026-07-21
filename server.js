@@ -1,12 +1,44 @@
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 const { sequelize } = require('./src/models');
 const apiRoutes = require('./src/routes/api');
 const { setIo } = require('./src/socket');
 const { runAutoMigrations } = require('./src/migrations/autoMigrations');
+
+// ── Validate required environment variables ──────────────────────────────────
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('[FATAL] JWT_SECRET environment variable is not set. Refusing to start.');
+  process.exit(1);
+}
+
+// ── Allowed CORS origins ──────────────────────────────────────────────────────
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : ['http://localhost:3000', 'http://localhost:3001'];
+
+// ── Rate limiters ─────────────────────────────────────────────────────────────
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests from this IP. Please try again after 15 minutes.' }
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please slow down.' }
+});
 
 const app = express();
 const PORT = process.env.PORT || 5003;
@@ -17,21 +49,36 @@ const { Server } = require('socket.io');
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+    origin: allowedOrigins,
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+});
+
+// ── Socket.IO authentication via httpOnly cookie ──────────────────────────────
+const { parse: parseCookie } = require('cookie');
+io.use((socket, next) => {
+  try {
+    const raw = socket.handshake.headers.cookie || '';
+    const cookies = parseCookie(raw);
+    const token = cookies.token;
+    if (!token) return next(new Error('Socket: Unauthorized — no session cookie'));
+    const decoded = jwt.verify(token, JWT_SECRET);
+    socket.data.user = decoded;
+    next();
+  } catch (err) {
+    next(new Error('Socket: Unauthorized — invalid or expired token'));
   }
 });
 
 // Register io in the shared socket singleton so controllers can use it
 setIo(io);
 
-// Socket.io: per-user rooms so targeted notifications can be sent
+// Socket.io: auto-join per-user room based on verified token payload
 io.on('connection', (socket) => {
-  socket.on('join_user_room', (userId) => {
-    if (userId) {
-      socket.join(`user_${userId}`);
-    }
-  });
+  if (socket.data.user && socket.data.user.id) {
+    socket.join(`user_${socket.data.user.id}`);
+  }
 });
 
 // Attach socket server to request object
@@ -92,16 +139,35 @@ app.use((req, res, next) => {
   next();
 });
 
-// 1. Parsing and CORS Middlewares
+// 1. Trust the first proxy (correct IP detection behind nginx/load balancer)
+app.set('trust proxy', 1);
+
+// 2. Security headers via Helmet
+app.use(helmet({
+  contentSecurityPolicy: false // Disable CSP here; Next.js frontend handles its own
+}));
+
+// 3. CORS — restrict to explicit origin allowlist
 app.use(cors({
-  origin: true,
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS: Origin ${origin} not allowed`));
+    }
+  },
   credentials: true
 }));
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use(cookieParser());
 
-// 2. Mount API Routes
+// 4. Rate limiting
+app.use('/api/auth', authLimiter);   // strict limit on auth endpoints
+app.use('/api', apiLimiter);          // general limit on all API routes
+
+// 5. Mount API Routes
 app.use('/api', apiRoutes);
 
 app.get('/api/heartBeat', async (req, res) => {
@@ -140,6 +206,7 @@ async function startServer() {
       console.log(` Aux AssetCare REST & Socket Server Running on http://localhost:${PORT}`);
       console.log(` Mode: ${process.env.NODE_ENV || 'development'}`);
       console.log(` Database Host: ${process.env.DB_HOST || '127.0.0.1'}`);
+      console.log(` Allowed Origins: ${allowedOrigins.join(', ')}`);
       console.log(`==================================================`);
     });
   } catch (error) {

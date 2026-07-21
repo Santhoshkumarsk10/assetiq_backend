@@ -164,7 +164,7 @@ async function listLicenses(req, res) {
 
     const paginate = req.body.paginate !== false;
     const page = parseInt(req.body.page) || 1;
-    const limit = parseInt(req.body.limit) || 10;
+    const limit = Math.min(parseInt(req.body.limit) || 10, 200);
     const offset = (page - 1) * limit;
 
     const search = req.body.search;
