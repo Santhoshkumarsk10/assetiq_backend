@@ -14,7 +14,7 @@ async function listAssets(req, res) {
 
     const paginate = req.body.paginate !== false;
     const page = parseInt(req.body.page) || 1;
-    const limit = parseInt(req.body.limit) || 10;
+    const limit = Math.min(parseInt(req.body.limit) || 10, 200);
     const offset = (page - 1) * limit;
 
     const search = req.body.search;
@@ -662,57 +662,44 @@ async function importAssets(req, res) {
           });
 
           if (!user) {
-            // Auto-create user profile under this row's location
-            const crypto = require('crypto');
-            const sha256Password = crypto.createHash('sha256').update('user123').digest('hex');
-            const hashedPassword = await bcrypt.hash(sha256Password, 10);
-            user = await User.create({
-              employee_id: 'EMP' + Math.floor(100000 + Math.random() * 900000),
-              name: assigned,
-              email: assigned.toLowerCase().replace(/[^a-z0-9]/g, '') + '@assetiq.com',
-              password: hashedPassword,
-              role_id: 4, // Regular User
-              location_id: rowLocId,
-              status: 'active',
-              department: 'Operations',
-              designation: 'Staff'
-            }, { transaction: t });
-            usersCreatedCount++;
-          }
+            // C-03 Security Fix: Do NOT auto-create user accounts with default passwords.
+            // Skip this assignment and record it as a warning in the import results.
+            errors.push(`Row ${rowIndex}: Assigned user "${assigned}" not found in the system. Please add the user via the Users module first, then re-import.`);
+          } else {
+            // Check for existing active allocation for this asset
+            const existingAlloc = await AssetAllocation.findOne({
+              where: { asset_id: asset.id, status: 'active' },
+              transaction: t
+            });
 
-          // Check for existing active allocation for this asset
-          const existingAlloc = await AssetAllocation.findOne({
-            where: { asset_id: asset.id, status: 'active' },
-            transaction: t
-          });
+            if (!existingAlloc) {
+              await AssetAllocation.create({
+                asset_id: asset.id,
+                user_id: user.id,
+                allocated_by: req.user.id,
+                status: 'active',
+                notes: `Imported from Excel - assigned to ${assigned}`
+              }, { transaction: t });
 
-          if (!existingAlloc) {
-            await AssetAllocation.create({
-              asset_id: asset.id,
-              user_id: user.id,
-              allocated_by: req.user.id,
-              status: 'active',
-              notes: `Imported from Excel - assigned to ${assigned}`
-            }, { transaction: t });
+              asset.status = 'allocated';
+              await asset.save({ transaction: t });
+            } else if (existingAlloc.user_id !== user.id) {
+              // Re-allocate
+              existingAlloc.status = 'returned';
+              existingAlloc.returned_at = new Date();
+              await existingAlloc.save({ transaction: t });
 
-            asset.status = 'allocated';
-            await asset.save({ transaction: t });
-          } else if (existingAlloc.user_id !== user.id) {
-            // Re-allocate
-            existingAlloc.status = 'returned';
-            existingAlloc.returned_at = new Date();
-            await existingAlloc.save({ transaction: t });
+              await AssetAllocation.create({
+                asset_id: asset.id,
+                user_id: user.id,
+                allocated_by: req.user.id,
+                status: 'active',
+                notes: `Imported from Excel - reassigned to ${assigned}`
+              }, { transaction: t });
 
-            await AssetAllocation.create({
-              asset_id: asset.id,
-              user_id: user.id,
-              allocated_by: req.user.id,
-              status: 'active',
-              notes: `Imported from Excel - reassigned to ${assigned}`
-            }, { transaction: t });
-
-            asset.status = 'allocated';
-            await asset.save({ transaction: t });
+              asset.status = 'allocated';
+              await asset.save({ transaction: t });
+            }
           }
         } else {
           // If not assigned to a user, release any active allocation

@@ -97,7 +97,7 @@ async function getInventoryDataHelper(user, body) {
 
   const paginate = body.paginate !== false;
   const page = parseInt(body.page) || 1;
-  const limit = parseInt(body.limit) || 10;
+  const limit = Math.min(parseInt(body.limit) || 10, 200);
   const offset = (page - 1) * limit;
 
   const { search, location_id, type, status, startDate, endDate } = body;
@@ -194,7 +194,7 @@ async function getAllocationDataHelper(user, body) {
 
   const paginate = body.paginate !== false;
   const page = parseInt(body.page) || 1;
-  const limit = parseInt(body.limit) || 10;
+  const limit = Math.min(parseInt(body.limit) || 10, 200);
   const offset = (page - 1) * limit;
 
   const { search, status, startDate, endDate, location_id } = body;
@@ -279,7 +279,7 @@ async function getTicketDataHelper(user, body) {
 
   const paginate = body.paginate !== false;
   const page = parseInt(body.page) || 1;
-  const limit = parseInt(body.limit) || 10;
+  const limit = Math.min(parseInt(body.limit) || 10, 200);
   const offset = (page - 1) * limit;
 
   const { search, category, priority, status, location_id, startDate, endDate } = body;
@@ -352,7 +352,7 @@ async function getLicenseDataHelper(user, body) {
 
   const paginate = body.paginate !== false;
   const page = parseInt(body.page) || 1;
-  const limit = parseInt(body.limit) || 10;
+  const limit = Math.min(parseInt(body.limit) || 10, 200);
   const offset = (page - 1) * limit;
 
   const { search, status, startDate, endDate, location_id } = body;
@@ -430,7 +430,7 @@ async function getAuditDataHelper(user, body) {
 
   const paginate = body.paginate !== false;
   const page = parseInt(body.page) || 1;
-  const limit = parseInt(body.limit) || 10;
+  const limit = Math.min(parseInt(body.limit) || 10, 200);
   const offset = (page - 1) * limit;
 
   const { search, action, startDate, endDate } = body;

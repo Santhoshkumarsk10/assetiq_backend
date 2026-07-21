@@ -13,7 +13,7 @@ async function listUsers(req, res) {
 
     const paginate = req.body.paginate !== false;
     const page = parseInt(req.body.page) || 1;
-    const limit = parseInt(req.body.limit) || 10;
+    const limit = Math.min(parseInt(req.body.limit) || 10, 200);
     const offset = (page - 1) * limit;
 
     const search = req.body.search;
@@ -227,6 +227,11 @@ async function editUser(req, res) {
     user.employee_id = employee_id !== undefined ? employee_id : user.employee_id;
     user.department = department !== undefined ? department : user.department;
     user.designation = designation !== undefined ? designation : user.designation;
+    // M-04 Fix: Validate status against an explicit allowlist to prevent mass assignment
+    const ALLOWED_STATUSES = ['active', 'inactive'];
+    if (status && !ALLOWED_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `Invalid status value. Allowed values: ${ALLOWED_STATUSES.join(', ')}.` });
+    }
     user.status = status || user.status;
     
     if (reporting_manager_id === 'self') {

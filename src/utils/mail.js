@@ -10,7 +10,8 @@ const transporter = nodemailer.createTransport({
     pass: process.env.MAIL_PASS || ''
   },
   tls: {
-    rejectUnauthorized: false
+    // Set MAIL_TLS_REJECT_UNAUTHORIZED=false only in local dev for self-signed certs
+    rejectUnauthorized: process.env.MAIL_TLS_REJECT_UNAUTHORIZED !== 'false'
   }
 });
 

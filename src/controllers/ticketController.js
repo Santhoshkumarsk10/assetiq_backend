@@ -151,7 +151,8 @@ async function raiseTicket(req, res) {
 // ── 2. List Tickets ──────────────────────────────────────────────────────────
 async function listTickets(req, res) {
   try {
-    const { page = 1, limit = 15, search, status, priority, category } = req.body;
+    const { page = 1, search, status, priority, category } = req.body;
+    const limit = Math.min(parseInt(req.body.limit) || 15, 200); // M-08: cap at 200
     const roleName = req.user.role_name;
     const offset = (page - 1) * limit;
 
@@ -582,6 +583,18 @@ async function listComments(req, res) {
   if (!ticket_id) return res.status(400).json({ error: 'Ticket ID is required.' });
 
   try {
+    // M-03 Fix: Verify the requesting user has access to this ticket before returning comments
+    const ticket = await Ticket.findByPk(ticket_id);
+    if (!ticket) return res.status(404).json({ error: 'Ticket not found.' });
+
+    const roleName = req.user.role_name;
+    if (roleName === 'User' && ticket.user_id !== req.user.id) {
+      return res.status(403).json({ error: 'You do not have access to comments on this ticket.' });
+    }
+    if (roleName === 'Location Admin' && parseInt(ticket.location_id) !== parseInt(req.user.location_id)) {
+      return res.status(403).json({ error: 'This ticket belongs to a different location.' });
+    }
+
     const comments = await TicketComment.findAll({
       where: { ticket_id },
       include: [{ model: User, as: 'author', attributes: ['id', 'name', 'email'] }],
@@ -590,7 +603,7 @@ async function listComments(req, res) {
 
     return res.json({ success: true, comments });
   } catch (error) {
-    console.error('Error listing comments:', error);
+    console.error('[listComments] Error:', error.message);
     return res.status(500).json({ error: 'Failed to list comments.' });
   }
 }

@@ -14,7 +14,7 @@ async function listOnboarding(req, res) {
 
     const paginate = req.body.paginate !== false;
     const page = parseInt(req.body.page) || 1;
-    const limit = parseInt(req.body.limit) || 10;
+    const limit = Math.min(parseInt(req.body.limit) || 10, 200);
     const offset = (page - 1) * limit;
 
     const search = req.body.search;
@@ -648,17 +648,30 @@ async function step5(req, res) {
       action: 'ONBOARD_STEP5_ACTIVATE',
       entityType: 'OnboardingRequest',
       entityId: request.id,
-      details: `Activated employee account for ${request.name}. Credentials generated.`,
+      details: `Activated employee account for ${request.name}. Setup link generated.`,
       req
     });
+
+    // C-04 Fix: Generate a secure one-time setup token and store it in the DB.
+    // Return the setup URL — the plaintext password is NEVER returned to the caller.
+    const setupToken = crypto.randomBytes(32).toString('hex');
+    const { User: UserModel } = require('../models');
+    const createdUser = await UserModel.findOne({ where: { email: officialEmail } });
+    if (createdUser) {
+      createdUser.reset_token = setupToken;
+      createdUser.reset_token_expiry = new Date(Date.now() + 72 * 60 * 60 * 1000); // 72 hours
+      await createdUser.save();
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const setupUrl = `${frontendUrl}/reset-password?token=${setupToken}`;
 
     return res.json({
       message: 'Account activated successfully. Step 5 complete.',
       request,
-      credentials: {
-        email: officialEmail,
-        password: plainPassword
-      }
+      setup_url: setupUrl,
+      official_email: officialEmail
+      // Note: plaintext password is intentionally NOT returned here
     });
 
   } catch (error) {
@@ -672,7 +685,9 @@ async function step5(req, res) {
  */
 async function step6(req, res) {
   const id = req.body.id || req.params.id;
-  const { official_email, password } = req.body;
+  const { official_email } = req.body;
+  // C-04 Fix: Do NOT accept plaintext password from the client.
+  // The setup link is derived from the user's reset_token stored in DB.
   const isLocationAdmin = req.user.role_name === 'Location Admin';
   const myLocId = req.user.location_id;
 
@@ -680,8 +695,8 @@ async function step6(req, res) {
     return res.status(400).json({ error: 'Onboarding ID is required.' });
   }
 
-  if (!official_email || !password) {
-    return res.status(400).json({ error: 'Official corporate email and generated password credentials must be supplied.' });
+  if (!official_email) {
+    return res.status(400).json({ error: 'Official corporate email address is required.' });
   }
 
   try {
@@ -695,23 +710,30 @@ async function step6(req, res) {
       return res.status(403).json({ error: 'Unauthorized location action.' });
     }
 
-    // Send the email
-    const subject = `Welcome to the Team, ${request.name}! Your Corporate Credentials`;
+    // Fetch the setup token from the newly created user's record
+    const { User: UserModel } = require('../models');
+    const newUser = await UserModel.findOne({ where: { email: official_email } });
+    if (!newUser || !newUser.reset_token) {
+      return res.status(400).json({ error: 'Setup link not found. Please complete Step 5 first.' });
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const setupUrl = `${frontendUrl}/reset-password?token=${newUser.reset_token}`;
+
+    // Send the setup link email — employee sets their own password
+    const subject = `Welcome to the Team, ${request.name}! Set Up Your Corporate Account`;
     const emailHtml = `
       <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
         <h2>Welcome ${request.name},</h2>
         <p>We are excited to have you join our team in the <strong>${request.department}</strong> department!</p>
-        <p>Below are your official corporate account login credentials. Please log in and change your password immediately.</p>
-        <table style="width: 100%; max-width: 500px; border-collapse: collapse; margin: 20px 0;">
-          <tr>
-            <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold; background: #f9f9f9;">Official Email:</td>
-            <td style="padding: 10px; border: 1px solid #ddd;">${official_email}</td>
-          </tr>
-          <tr>
-            <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold; background: #f9f9f9;">One-Time Password:</td>
-            <td style="padding: 10px; border: 1px solid #ddd; font-family: monospace;">${password}</td>
-          </tr>
-        </table>
+        <p>Your corporate account has been created. Please click the link below to set your own password and activate your account.</p>
+        <p style="margin: 24px 0;">
+          <a href="${setupUrl}" style="background:#16a34a;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;">
+            Set Up My Account
+          </a>
+        </p>
+        <p>Your corporate email address is: <strong>${official_email}</strong></p>
+        <p style="color:#888;font-size:12px;">This link will expire in 72 hours. If you did not request this, please contact IT support.</p>
         <p>Best Regards,<br>Onboarding Support Team</p>
       </div>
     `;
@@ -731,17 +753,17 @@ async function step6(req, res) {
       action: 'ONBOARD_STEP6_NOTIFY',
       entityType: 'OnboardingRequest',
       entityId: request.id,
-      details: `Sent credentials welcome email to ${request.personal_email}`,
+      details: `Sent account setup link email to ${request.personal_email}`,
       req
     });
 
     return res.json({
-      message: 'Onboarding pipeline completed! Welcome credentials email sent.',
+      message: 'Onboarding pipeline completed! Account setup email sent to employee.',
       request
     });
 
   } catch (error) {
-    console.error('Error in step 6:', error);
+    console.error('[step6] Error:', error.message);
     return res.status(500).json({ error: 'Failed to process notification transmission.' });
   }
 }
@@ -753,7 +775,7 @@ async function listEmailRequests(req, res) {
   try {
     const paginate = req.body.paginate !== false;
     const page = parseInt(req.body.page) || 1;
-    const limit = parseInt(req.body.limit) || 10;
+    const limit = Math.min(parseInt(req.body.limit) || 10, 200);
     const offset = (page - 1) * limit;
 
     let queryOptions = {

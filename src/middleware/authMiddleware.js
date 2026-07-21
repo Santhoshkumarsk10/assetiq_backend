@@ -2,7 +2,9 @@ const jwt = require('jsonwebtoken');
 const { User, Role, Permission, Location } = require('../models');
 require('dotenv').config();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'assetiq-super-secret-jwt-key-2026!@#';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) throw new Error('[FATAL] JWT_SECRET env var is not set');
+
 
 async function authenticate(req, res, next) {
   let token = null;
