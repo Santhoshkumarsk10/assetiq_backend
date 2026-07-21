@@ -9,5 +9,6 @@ router.post('/allocations', authenticate, reportController.getAllocationReport);
 router.post('/tickets', authenticate, reportController.getTicketReport);
 router.post('/licenses', authenticate, reportController.getLicenseReport);
 router.post('/audit-logs', authenticate, reportController.getAuditReport);
+router.post('/export', authenticate, reportController.exportReport);
 
 module.exports = router;
