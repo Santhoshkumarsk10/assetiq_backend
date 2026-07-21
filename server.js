@@ -104,6 +104,10 @@ app.use(cookieParser());
 // 2. Mount API Routes
 app.use('/api', apiRoutes);
 
+app.get('/api/heartBeat', async (req, res) => {
+    res.status(200).send('Aux Asset Care API working...!');
+});
+
 // 3. 404 handler
 app.use((req, res, next) => {
   res.status(404).json({ error: 'Endpoint not found.' });

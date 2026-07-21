@@ -13,6 +13,7 @@ const rolesRoutes = require('./roles');
 const licenseRoutes = require('./license');
 const notificationsRoutes = require('./notifications');
 const ticketRoutes = require('./tickets');
+const reportRoutes = require('./reports');
 
 // Mount routes
 router.use('/auth', authRoutes);
@@ -25,6 +26,7 @@ router.use('/email-requests', emailRequestsRoutes);
 router.use('/licenses', licenseRoutes);
 router.use('/notifications', notificationsRoutes);
 router.use('/tickets', ticketRoutes);
+router.use('/reports', reportRoutes);
 router.use('/', rolesRoutes);
 
 module.exports = router;
