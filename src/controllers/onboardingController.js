@@ -41,10 +41,6 @@ async function listOnboarding(req, res) {
           model: User,
           as: 'generalManager',
           attributes: ['id', 'name', 'email']
-        },
-        {
-          model: EmailCreationRequest,
-          as: 'emailRequest'
         }
       ]
     };
