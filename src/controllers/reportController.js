@@ -151,6 +151,7 @@ async function getInventoryDataHelper(user, body) {
   }
 
   queryOptions.where = whereClause;
+  queryOptions.distinct = true;
 
   let assets, total;
   if (paginate) {
@@ -163,6 +164,35 @@ async function getInventoryDataHelper(user, body) {
     assets = await Asset.findAll(queryOptions);
     total = assets.length;
   }
+
+  // Calculate summary metrics for all assets matching filter criteria
+  const allMatchingForMetrics = await Asset.findAll({
+    where: whereClause,
+    attributes: ['id', 'status', 'type'],
+    include: isRegularUser ? queryOptions.include : []
+  });
+
+  const totalAssetsCount = allMatchingForMetrics.length;
+  const availableAssetsCount = allMatchingForMetrics.filter(a => a.status === 'available').length;
+  const allocatedAssetsCount = allMatchingForMetrics.filter(a => a.status === 'allocated').length;
+  const maintenanceAssetsCount = allMatchingForMetrics.filter(a => a.status === 'maintenance').length;
+
+  const typeMap = {};
+  allMatchingForMetrics.forEach(a => {
+    if (a.type) typeMap[a.type] = (typeMap[a.type] || 0) + 1;
+  });
+  const typeBreakdownData = Object.keys(typeMap).map(key => ({
+    name: key,
+    value: typeMap[key]
+  }));
+
+  const summary = {
+    totalAssetsCount,
+    availableAssetsCount,
+    allocatedAssetsCount,
+    maintenanceAssetsCount,
+    typeBreakdownData
+  };
 
   const flattedAssets = assets.map(a => {
     const activeAllocation = a.allocations && a.allocations[0];
@@ -180,7 +210,7 @@ async function getInventoryDataHelper(user, body) {
     locations = await Location.findAll({ order: [['name', 'ASC']] });
   }
 
-  return { assets: flattedAssets, locations, total };
+  return { assets: flattedAssets, locations, total, summary };
 }
 
 /**
@@ -232,6 +262,7 @@ async function getAllocationDataHelper(user, body) {
 
   const queryOptions = {
     where: allocationWhere,
+    distinct: true,
     include: [
       {
         model: Asset,
@@ -265,7 +296,9 @@ async function getAllocationDataHelper(user, body) {
     total = allocations.length;
   }
 
-  return { allocations, total };
+  const summary = { total };
+
+  return { allocations, total, summary };
 }
 
 /**
@@ -316,6 +349,7 @@ async function getTicketDataHelper(user, body) {
 
   const queryOptions = {
     where: whereClause,
+    distinct: true,
     include: [
       { model: Location, as: 'location', attributes: ['id', 'name'] },
       { model: Asset, as: 'asset', attributes: ['id', 'asset_tag', 'name', 'type'] },
@@ -338,7 +372,44 @@ async function getTicketDataHelper(user, body) {
     total = tickets.length;
   }
 
-  return { tickets, total };
+  // Calculate summary metrics for tickets matching filter criteria
+  const allMatchingForMetrics = await Ticket.findAll({
+    where: whereClause,
+    attributes: ['id', 'status', 'priority']
+  });
+
+  const totalTicketsCount = allMatchingForMetrics.length;
+  const pendingTicketsCount = allMatchingForMetrics.filter(t => t.status === 'pending').length;
+  const progressTicketsCount = allMatchingForMetrics.filter(t => t.status === 'in_progress').length;
+  const resolvedTicketsCount = allMatchingForMetrics.filter(t => t.status === 'resolved').length;
+  const closedTicketsCount = allMatchingForMetrics.filter(t => t.status === 'closed').length;
+  const cancelledTicketsCount = allMatchingForMetrics.filter(t => t.status === 'cancelled').length;
+
+  const ticketPriorityMap = {};
+  allMatchingForMetrics.forEach(t => {
+    if (t.priority) {
+      ticketPriorityMap[t.priority] = (ticketPriorityMap[t.priority] || 0) + 1;
+    }
+  });
+
+  const summary = {
+    totalTicketsCount,
+    pendingTicketsCount,
+    progressTicketsCount,
+    resolvedTicketsCount,
+    closedTicketsCount,
+    cancelledTicketsCount,
+    ticketPriorityMap
+  };
+
+  let locations = [];
+  if (isLocationAdmin) {
+    locations = await Location.findAll({ where: { id: myLocId } });
+  } else {
+    locations = await Location.findAll({ order: [['name', 'ASC']] });
+  }
+
+  return { tickets, locations, total, summary };
 }
 
 /**
@@ -393,6 +464,8 @@ async function getLicenseDataHelper(user, body) {
 
   const queryOptions = {
     where: whereClause,
+    distinct: true,
+    subQuery: false,
     include: [
       {
         model: User,
@@ -416,7 +489,34 @@ async function getLicenseDataHelper(user, body) {
     total = licenses.length;
   }
 
-  return { licenses, total };
+  // Calculate summary metrics for licenses matching filter criteria
+  const allMatchingForMetrics = await SoftwareLicense.findAll({
+    where: whereClause,
+    attributes: ['id', 'status', 'software_name'],
+    include: queryOptions.include,
+    subQuery: false
+  });
+
+  const totalLicensesCount = allMatchingForMetrics.length;
+  const activeLicensesCount = allMatchingForMetrics.filter(l => l.status === 'active').length;
+  const availableLicensesCount = allMatchingForMetrics.filter(l => l.status === 'available').length;
+  const expiredLicensesCount = allMatchingForMetrics.filter(l => l.status === 'expired').length;
+
+  const licenseSoftwareMap = {};
+  allMatchingForMetrics.forEach(l => {
+    const softName = l.software_name || 'Unknown Software';
+    licenseSoftwareMap[softName] = (licenseSoftwareMap[softName] || 0) + 1;
+  });
+
+  const summary = {
+    totalLicensesCount,
+    activeLicensesCount,
+    availableLicensesCount,
+    expiredLicensesCount,
+    licenseSoftwareMap
+  };
+
+  return { licenses, total, summary };
 }
 
 /**
@@ -467,6 +567,8 @@ async function getAuditDataHelper(user, body) {
 
   const queryOptions = {
     where: whereClause,
+    distinct: true,
+    subQuery: false,
     include: [
       { model: User, as: 'user', attributes: ['id', 'name', 'email'] }
     ],
@@ -485,7 +587,9 @@ async function getAuditDataHelper(user, body) {
     total = logs.length;
   }
 
-  return { logs, total };
+  const summary = { total };
+
+  return { logs, total, summary };
 }
 
 /**
@@ -502,6 +606,7 @@ async function getInventoryReport(req, res) {
       success: true,
       assets: data.assets,
       locations: data.locations,
+      summary: data.summary,
       pagination: paginate ? {
         page,
         limit,
@@ -528,6 +633,7 @@ async function getAllocationReport(req, res) {
     return res.json({
       success: true,
       allocations: data.allocations,
+      summary: data.summary,
       pagination: paginate ? {
         page,
         limit,
@@ -554,6 +660,8 @@ async function getTicketReport(req, res) {
     return res.json({
       success: true,
       tickets: data.tickets,
+      locations: data.locations,
+      summary: data.summary,
       pagination: paginate ? {
         page,
         limit,
@@ -580,6 +688,7 @@ async function getLicenseReport(req, res) {
     return res.json({
       success: true,
       licenses: data.licenses,
+      summary: data.summary,
       pagination: paginate ? {
         page,
         limit,
@@ -606,6 +715,7 @@ async function getAuditReport(req, res) {
     return res.json({
       success: true,
       logs: data.logs,
+      summary: data.summary,
       pagination: paginate ? {
         page,
         limit,
