@@ -204,10 +204,41 @@ async function listTickets(req, res) {
       });
     }
 
+    // Calculate summary metrics for tickets matching filter criteria
+    const allMatchingForMetrics = await Ticket.findAll({
+      where: whereClause,
+      attributes: ['id', 'status', 'priority']
+    });
+
+    const totalTicketsCount = allMatchingForMetrics.length;
+    const pendingTicketsCount = allMatchingForMetrics.filter(t => t.status === 'pending').length;
+    const progressTicketsCount = allMatchingForMetrics.filter(t => t.status === 'in_progress').length;
+    const resolvedTicketsCount = allMatchingForMetrics.filter(t => t.status === 'resolved').length;
+    const closedTicketsCount = allMatchingForMetrics.filter(t => t.status === 'closed').length;
+    const cancelledTicketsCount = allMatchingForMetrics.filter(t => t.status === 'cancelled').length;
+
+    const ticketPriorityMap = {};
+    allMatchingForMetrics.forEach(t => {
+      if (t.priority) {
+        ticketPriorityMap[t.priority] = (ticketPriorityMap[t.priority] || 0) + 1;
+      }
+    });
+
+    const summary = {
+      totalTicketsCount,
+      pendingTicketsCount,
+      progressTicketsCount,
+      resolvedTicketsCount,
+      closedTicketsCount,
+      cancelledTicketsCount,
+      ticketPriorityMap
+    };
+
     return res.json({
       success: true,
       tickets: rows,
       admins,
+      summary,
       pagination: { total: count, page: parseInt(page), limit: parseInt(limit), totalPages: Math.ceil(count / limit) }
     });
   } catch (error) {
