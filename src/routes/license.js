@@ -15,5 +15,6 @@ router.post('/renewal/submit',      authenticate, requirePermission('license.ren
 router.post('/renewal/list',        authenticate, requirePermission('license.list'),           licenseController.listRenewalRequests);
 router.post('/renewal/decide',      authenticate, requirePermission('license.renewal.decide'), licenseController.approveRenewalRequest);
 router.post('/renewal/notify-user', authenticate, requirePermission('license.notify'),         licenseController.notifyAssignedUser);
+router.post('/test-notification',   authenticate, licenseController.triggerTestNotification);
 
 module.exports = router;

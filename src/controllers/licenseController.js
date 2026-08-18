@@ -25,6 +25,15 @@ async function createNotification({ userId, title, message, type = 'info', refer
       io.to(`user_${userId}`).emit('new_notification', notif);
     }
 
+    // Try sending push notification if fcm_token is set
+    const user = await User.findByPk(userId, { attributes: ['fcm_token'] });
+    if (user && user.fcm_token) {
+      const { sendPushNotification } = require('../utils/pushNotification');
+      sendPushNotification(user.fcm_token, title, message).catch(err => {
+        console.error('[PUSH NOTIFICATION TRIGGER ERROR]', err.message);
+      });
+    }
+
     return notif;
   } catch (err) {
     console.error('[NOTIFICATION ERROR]', err.message);
@@ -66,26 +75,160 @@ async function checkAndMarkExpiredLicenses() {
       ]
     });
 
-    if (!expiredLicenses.length) return;
+    if (expiredLicenses.length > 0) {
+      // Get all admin-level users once
+      const adminUsers = await getAdminUsers();
 
-    // Get all admin-level users once
+      for (const license of expiredLicenses) {
+        // 1. Mark as expired
+        await license.update({ status: 'expired' });
+
+        const licenseInfo = `${license.software_name} (Key: ${license.license_key.substring(0, 8)}...)`;
+        const title = `⚠️ License Expired: ${license.software_name}`;
+        const message = `The software license "${license.software_name}" expired on ${license.valid_until}. Please initiate a renewal request.`;
+
+        // 2. Notify all Admins / IT Admins
+        for (const adminUser of adminUsers) {
+          await createNotification({
+            userId: adminUser.id,
+            title,
+            message,
+            type: 'license_expired',
+            referenceId: license.id
+          });
+
+          sendEmail({
+            to: adminUser.email,
+            subject: title,
+            html: `
+              <div style="font-family: sans-serif; max-width: 600px; margin: auto;">
+                <h2 style="color: #dc2626;">⚠️ Software License Expired</h2>
+                <p>Hello <strong>${adminUser.name}</strong>,</p>
+                <p>The following software license has <strong>expired</strong> and requires renewal:</p>
+                <table style="border-collapse: collapse; width: 100%;">
+                  <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Software</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.software_name}</td></tr>
+                  <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>License Key</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.license_key.substring(0, 8)}...</td></tr>
+                  <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Expired On</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; color: #dc2626;">${license.valid_until}</td></tr>
+                  ${license.user ? `<tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Assigned User</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.user.name} (${license.user.email})</td></tr>` : ''}
+                </table>
+                <p style="margin-top: 16px;">Please log in to <strong>Aux AssetCare</strong> and submit a renewal request for this license.</p>
+              </div>
+            `
+          }).catch(() => {});
+        }
+
+        // 3. Also notify Location Admin of the assigned user's location (if applicable)
+        if (license.user && license.user.location_id) {
+          const locationAdmins = await User.findAll({
+            include: [{ model: Role, as: 'role', where: { name: 'Location Admin' } }],
+            where: { location_id: license.user.location_id, status: 'active' }
+          });
+
+          for (const la of locationAdmins) {
+            await createNotification({
+              userId: la.id,
+              title,
+              message: `The software license "${license.software_name}" assigned to ${license.user.name} has expired. The IT Admin will initiate a renewal.`,
+              type: 'license_expired',
+              referenceId: license.id
+            });
+
+            sendEmail({
+              to: la.email,
+              subject: title,
+              html: `
+                <div style="font-family: sans-serif; max-width: 600px; margin: auto;">
+                  <h2 style="color: #dc2626;">⚠️ Software License Expired</h2>
+                  <p>Hello <strong>${la.name}</strong>,</p>
+                  <p>A software license assigned to a user at your location has <strong>expired</strong>:</p>
+                  <table style="border-collapse: collapse; width: 100%;">
+                    <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Software</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.software_name}</td></tr>
+                    <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Assigned User</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.user.name} (${license.user.email})</td></tr>
+                    <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Expired On</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; color: #dc2626;">${license.valid_until}</td></tr>
+                  </table>
+                  <p style="margin-top: 16px;">The IT Admin has been notified and will process a renewal request.</p>
+                </div>
+              `
+            }).catch(() => {});
+          }
+        }
+
+        console.log(`[LICENSE EXPIRY] Marked license #${license.id} (${license.software_name}) as expired and sent alerts.`);
+      }
+    }
+
+    // Run upcoming expiry warning check (1 month prior)
+    await checkAndNotifyUpcomingExpiringLicenses();
+  } catch (err) {
+    console.error('[LICENSE EXPIRY CHECK ERROR]', err.message);
+  }
+}
+
+/**
+ * Scan for licenses expiring in <= 30 days and send 1-month-prior warnings.
+ * Uses exact message matching to avoid sending duplicate alerts.
+ */
+async function checkAndNotifyUpcomingExpiringLicenses() {
+  try {
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+
+    const targetDate = new Date();
+    targetDate.setDate(targetDate.getDate() + 30);
+    const targetDateStr = targetDate.toISOString().split('T')[0];
+
+    // Find licenses expiring within 30 days
+    const upcomingLicenses = await SoftwareLicense.findAll({
+      where: {
+        valid_until: {
+          [Op.gte]: todayStr,
+          [Op.lte]: targetDateStr
+        },
+        status: {
+          [Op.in]: ['active', 'available']
+        }
+      },
+      include: [
+        {
+          model: User,
+          as: 'user',
+          attributes: ['id', 'name', 'email', 'location_id'],
+          required: false
+        }
+      ]
+    });
+
+    if (!upcomingLicenses.length) return;
+
     const adminUsers = await getAdminUsers();
 
-    for (const license of expiredLicenses) {
-      // 1. Mark as expired
-      await license.update({ status: 'expired' });
+    for (const license of upcomingLicenses) {
+      // Check if notification already sent for this license and exact expiration date
+      const alreadyNotified = await Notification.findOne({
+        where: {
+          reference_id: license.id,
+          type: 'license_expiring_soon',
+          message: {
+            [Op.like]: `%${license.valid_until}%`
+          }
+        }
+      });
 
-      const licenseInfo = `${license.software_name} (Key: ${license.license_key.substring(0, 8)}...)`;
-      const title = `⚠️ License Expired: ${license.software_name}`;
-      const message = `The software license "${license.software_name}" expired on ${license.valid_until}. Please initiate a renewal request.`;
+      if (alreadyNotified) {
+        continue; // Skip if already notified for this expiration date
+      }
 
-      // 2. Notify all Admins / IT Admins
+      const licenseTypeStr = license.license_type === 'subscription' ? 'Subscription' : 'Validity';
+      const title = `⚠️ License Expiration Warning: ${license.software_name}`;
+      const message = `The ${licenseTypeStr.toLowerCase()} for "${license.software_name}" will expire in less than a month on ${license.valid_until}.`;
+
+      // 1. Notify Admins
       for (const adminUser of adminUsers) {
         await createNotification({
           userId: adminUser.id,
           title,
           message,
-          type: 'license_expired',
+          type: 'license_expiring_soon',
           referenceId: license.id
         });
 
@@ -94,22 +237,23 @@ async function checkAndMarkExpiredLicenses() {
           subject: title,
           html: `
             <div style="font-family: sans-serif; max-width: 600px; margin: auto;">
-              <h2 style="color: #dc2626;">⚠️ Software License Expired</h2>
+              <h2 style="color: #d97706;">⚠️ Software License Expiring Soon</h2>
               <p>Hello <strong>${adminUser.name}</strong>,</p>
-              <p>The following software license has <strong>expired</strong> and requires renewal:</p>
+              <p>The following software license is approaching its expiration date:</p>
               <table style="border-collapse: collapse; width: 100%;">
                 <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Software</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.software_name}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>License Type</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${licenseTypeStr}</td></tr>
                 <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>License Key</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.license_key.substring(0, 8)}...</td></tr>
-                <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Expired On</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; color: #dc2626;">${license.valid_until}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Expires On</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; color: #d97706; font-weight: bold;">${license.valid_until}</td></tr>
                 ${license.user ? `<tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Assigned User</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.user.name} (${license.user.email})</td></tr>` : ''}
               </table>
-              <p style="margin-top: 16px;">Please log in to <strong>Aux AssetCare</strong> and submit a renewal request for this license.</p>
+              <p style="margin-top: 16px;">Please initiate a renewal request in the <strong>Aux AssetCare</strong> system.</p>
             </div>
           `
         }).catch(() => {});
       }
 
-      // 3. Also notify Location Admin of the assigned user's location (if applicable)
+      // 2. Notify Location Admins
       if (license.user && license.user.location_id) {
         const locationAdmins = await User.findAll({
           include: [{ model: Role, as: 'role', where: { name: 'Location Admin' } }],
@@ -120,8 +264,8 @@ async function checkAndMarkExpiredLicenses() {
           await createNotification({
             userId: la.id,
             title,
-            message: `The software license "${license.software_name}" assigned to ${license.user.name} has expired. The IT Admin will initiate a renewal.`,
-            type: 'license_expired',
+            message: `The license "${license.software_name}" assigned to ${license.user.name} at your location will expire on ${license.valid_until}.`,
+            type: 'license_expiring_soon',
             referenceId: license.id
           });
 
@@ -130,13 +274,13 @@ async function checkAndMarkExpiredLicenses() {
             subject: title,
             html: `
               <div style="font-family: sans-serif; max-width: 600px; margin: auto;">
-                <h2 style="color: #dc2626;">⚠️ Software License Expired</h2>
+                <h2 style="color: #d97706;">⚠️ Software License Expiring Soon</h2>
                 <p>Hello <strong>${la.name}</strong>,</p>
-                <p>A software license assigned to a user at your location has <strong>expired</strong>:</p>
+                <p>A software license assigned to a user at your location is expiring soon:</p>
                 <table style="border-collapse: collapse; width: 100%;">
                   <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Software</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.software_name}</td></tr>
                   <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Assigned User</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.user.name} (${license.user.email})</td></tr>
-                  <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Expired On</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; color: #dc2626;">${license.valid_until}</td></tr>
+                  <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Expires On</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; color: #d97706; font-weight: bold;">${license.valid_until}</td></tr>
                 </table>
                 <p style="margin-top: 16px;">The IT Admin has been notified and will process a renewal request.</p>
               </div>
@@ -145,10 +289,38 @@ async function checkAndMarkExpiredLicenses() {
         }
       }
 
-      console.log(`[LICENSE EXPIRY] Marked license #${license.id} (${license.software_name}) as expired and sent alerts.`);
+      // 3. Notify the assigned user themselves
+      if (license.user) {
+        await createNotification({
+          userId: license.user.id,
+          title,
+          message: `Your assigned license for "${license.software_name}" will expire on ${license.valid_until}. Please contact the IT department if you still require it.`,
+          type: 'license_expiring_soon',
+          referenceId: license.id
+        });
+
+        sendEmail({
+          to: license.user.email,
+          subject: title,
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; margin: auto;">
+              <h2 style="color: #d97706;">⚠️ Your Assigned Software License is Expiring</h2>
+              <p>Hello <strong>${license.user.name}</strong>,</p>
+              <p>The software license assigned to you is approaching its expiration date:</p>
+              <table style="border-collapse: collapse; width: 100%;">
+                <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Software</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.software_name}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Expires On</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; color: #d97706; font-weight: bold;">${license.valid_until}</td></tr>
+              </table>
+              <p style="margin-top: 16px;">Please contact your IT administrator or manager if you need to continue using this software.</p>
+            </div>
+          `
+        }).catch(() => {});
+      }
+
+      console.log(`[LICENSE WARNING] Sent 1-month-prior warnings for license #${license.id} (${license.software_name}).`);
     }
   } catch (err) {
-    console.error('[LICENSE EXPIRY CHECK ERROR]', err.message);
+    console.error('[LICENSE WARNING CHECK ERROR]', err.message);
   }
 }
 
@@ -227,10 +399,14 @@ async function listLicenses(req, res) {
  * Add Software License
  */
 async function addLicense(req, res) {
-  const { software_name, license_key, valid_from, valid_until, assigned_user_id, status, notes } = req.body;
+  const { software_name, license_key, valid_from, valid_until, assigned_user_id, status, notes, license_type } = req.body;
 
   if (!software_name || !license_key) {
     return res.status(400).json({ error: 'Software Name and License Key are required.' });
+  }
+
+  if (license_type && !['subscription', 'validity'].includes(license_type)) {
+    return res.status(400).json({ error: 'Invalid license type. Must be subscription or validity.' });
   }
 
   try {
@@ -241,7 +417,8 @@ async function addLicense(req, res) {
       valid_until: valid_until || null,
       assigned_user_id: assigned_user_id ? parseInt(assigned_user_id) : null,
       status: status || 'available',
-      notes: notes || null
+      notes: notes || null,
+      license_type: license_type || 'validity'
     });
 
     await logAction({
@@ -268,10 +445,14 @@ async function addLicense(req, res) {
  */
 async function editLicense(req, res) {
   const id = req.body.id || req.params.id;
-  const { software_name, license_key, valid_from, valid_until, assigned_user_id, status, notes } = req.body;
+  const { software_name, license_key, valid_from, valid_until, assigned_user_id, status, notes, license_type } = req.body;
 
   if (!id) {
     return res.status(400).json({ error: 'License ID is required.' });
+  }
+
+  if (license_type && !['subscription', 'validity'].includes(license_type)) {
+    return res.status(400).json({ error: 'Invalid license type. Must be subscription or validity.' });
   }
 
   try {
@@ -287,6 +468,7 @@ async function editLicense(req, res) {
     license.assigned_user_id = assigned_user_id !== undefined ? (assigned_user_id ? parseInt(assigned_user_id) : null) : license.assigned_user_id;
     license.status = status || license.status;
     license.notes = notes !== undefined ? notes : license.notes;
+    license.license_type = license_type !== undefined ? license_type : license.license_type;
 
     await license.save();
 
@@ -675,6 +857,43 @@ async function notifyAssignedUser(req, res) {
   }
 }
 
+async function triggerTestNotification(req, res) {
+  try {
+    const title = "🔔 Test Notification from AssetIQ";
+    const message = `Hello ${req.user.name || 'User'}, this is a test notification to verify your Email and Push notification configurations!`;
+
+    // 1. In-app notification (which internally triggers FCM push if user has fcm_token)
+    await createNotification({
+      userId: req.user.id,
+      title,
+      message,
+      type: 'test_notification',
+      referenceId: null
+    });
+
+    // 2. Email notification
+    sendEmail({
+      to: req.user.email,
+      subject: title,
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px;">
+          <h2 style="color: #059669; margin-bottom: 16px;">🔔 Test Notification Configuration</h2>
+          <p>Hello <strong>${req.user.name || 'User'}</strong>,</p>
+          <p>Congratulations! Your email notification system is working perfectly.</p>
+          <p style="margin-top: 24px; color: #64748b; font-size: 12px; border-top: 1px solid #e2e8f0; padding-top: 16px;">This is an automated test message sent from your AssetIQ application.</p>
+        </div>
+      `
+    }).catch(err => {
+      console.error('[TEST EMAIL ERROR]', err.message);
+    });
+
+    return res.json({ success: true, message: 'Test notification triggered successfully!' });
+  } catch (error) {
+    console.error('Error triggering test notification:', error);
+    return res.status(500).json({ error: 'Failed to trigger test notification.' });
+  }
+}
+
 module.exports = {
   listLicenses,
   addLicense,
@@ -684,5 +903,6 @@ module.exports = {
   submitRenewalRequest,
   listRenewalRequests,
   approveRenewalRequest,
-  notifyAssignedUser
+  notifyAssignedUser,
+  triggerTestNotification
 };

@@ -32,6 +32,11 @@ const SoftwareLicense = sequelize.define('SoftwareLicense', {
     type: DataTypes.ENUM('available', 'active', 'expired'),
     defaultValue: 'available'
   },
+  license_type: {
+    type: DataTypes.ENUM('subscription', 'validity'),
+    defaultValue: 'validity',
+    allowNull: false
+  },
   notes: {
     type: DataTypes.TEXT,
     allowNull: true

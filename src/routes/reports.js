@@ -10,5 +10,13 @@ router.post('/tickets', authenticate, reportController.getTicketReport);
 router.post('/licenses', authenticate, reportController.getLicenseReport);
 router.post('/audit-logs', authenticate, reportController.getAuditReport);
 router.post('/export', authenticate, reportController.exportReport);
+router.post('/send-email', authenticate, reportController.sendReportEmail);
+
+// Report scheduling endpoints
+router.post('/schedules/list', authenticate, reportController.listSchedules);
+router.post('/schedules', authenticate, reportController.createSchedule);
+router.put('/schedules/:id', authenticate, reportController.updateSchedule);
+router.delete('/schedules/:id', authenticate, reportController.deleteSchedule);
+router.post('/schedules/:id/run', authenticate, reportController.runSchedule);
 
 module.exports = router;

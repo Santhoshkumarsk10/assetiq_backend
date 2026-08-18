@@ -15,7 +15,7 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-async function sendEmail({ to, subject, html }) {
+async function sendEmail({ to, subject, html, attachments }) {
   const fromName = process.env.MAIL_FROM_NAME || 'Aux AssetCare Team';
   const fromAddress = process.env.MAIL_FROM_ADDRESS || 'noreply@assetiq.com';
   
@@ -23,7 +23,8 @@ async function sendEmail({ to, subject, html }) {
     from: `"${fromName}" <${fromAddress}>`,
     to,
     subject,
-    html
+    html,
+    attachments
   };
 
   if (process.env.ENABLE_EMAILS === 'true') {

@@ -93,6 +93,10 @@ const User = sequelize.define('User', {
   general_manager_id: {
     type: DataTypes.INTEGER,
     allowNull: true
+  },
+  fcm_token: {
+    type: DataTypes.STRING(255),
+    allowNull: true
   }
 }, {
   timestamps: true,
