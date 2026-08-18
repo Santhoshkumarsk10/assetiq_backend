@@ -13,5 +13,6 @@ router.post('/offboard-verify', authenticate, requirePermission('onboarding.edit
 router.post('/offboard-list', authenticate, requirePermission('onboarding.list'), userController.listOffboardingQueue);
 router.post('/mfa-toggle', authenticate, userController.toggleMfa);
 router.post('/managers', authenticate, userController.listManagers);
+router.post('/update-fcm-token', authenticate, userController.updateFcmToken);
 
 module.exports = router;

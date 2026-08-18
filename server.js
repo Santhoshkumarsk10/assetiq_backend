@@ -194,12 +194,12 @@ async function startServer() {
     // Run auto migrations
     await runAutoMigrations();
 
-    // Start hourly license expiry check
-    const { checkAndMarkExpiredLicenses } = require('./src/controllers/licenseController');
-    checkAndMarkExpiredLicenses().catch(console.error); // Run immediately on start
-    setInterval(() => {
-      checkAndMarkExpiredLicenses().catch(console.error);
-    }, 60 * 60 * 1000); // Every 1 hour
+    // Start cron jobs
+    const { startLicenseExpiryJob } = require('./src/cron/licenseExpiryJob');
+    const { startReportScheduleJob } = require('./src/cron/reportScheduleJob');
+
+    startLicenseExpiryJob();
+    startReportScheduleJob();
 
     server.listen(PORT, '0.0.0.0', () => {
       console.log(`==================================================`);

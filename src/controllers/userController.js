@@ -629,6 +629,22 @@ async function listManagers(req, res) {
   }
 }
 
+async function updateFcmToken(req, res) {
+  const { fcm_token } = req.body;
+  try {
+    const user = await User.findByPk(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+    user.fcm_token = fcm_token || null;
+    await user.save();
+    return res.json({ message: 'FCM token updated successfully.' });
+  } catch (error) {
+    console.error('Error updating FCM token:', error);
+    return res.status(500).json({ error: 'Failed to update FCM token.' });
+  }
+}
+
 module.exports = {
   listUsers,
   addUser,
@@ -638,5 +654,6 @@ module.exports = {
   verifyOffboardReturn,
   listOffboardingQueue,
   toggleMfa,
-  listManagers
+  listManagers,
+  updateFcmToken
 };

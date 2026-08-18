@@ -606,6 +606,66 @@ async function runAutoMigrations() {
       console.log('[MIGRATION] Ticket permissions seeded and assigned to roles.');
     }
 
+    // 14. Add license_type to software_licenses and fcm_token to users if missing
+    const userTableInfoForFcm = await queryInterface.describeTable('users');
+    if (!userTableInfoForFcm.fcm_token) {
+      console.log('[MIGRATION] Adding fcm_token column to users...');
+      await queryInterface.addColumn('users', 'fcm_token', {
+        type: sequelize.Sequelize.STRING(255),
+        allowNull: true
+      });
+    }
+
+    const licenseTableInfoForType = await queryInterface.describeTable('software_licenses');
+    if (!licenseTableInfoForType.license_type) {
+      console.log('[MIGRATION] Adding license_type column to software_licenses...');
+      await queryInterface.addColumn('software_licenses', 'license_type', {
+        type: sequelize.Sequelize.ENUM('subscription', 'validity'),
+        defaultValue: 'validity',
+        allowNull: false
+      });
+    }
+
+    // 15. Create report_schedules table if missing
+    const tablesAfterAudit = await queryInterface.showAllTables();
+    if (!tablesAfterAudit.includes('report_schedules')) {
+      console.log('[MIGRATION] Creating report_schedules table...');
+      await queryInterface.createTable('report_schedules', {
+        id: { type: sequelize.Sequelize.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
+        report_id: { type: sequelize.Sequelize.STRING(100), allowNull: false },
+        report_title: { type: sequelize.Sequelize.STRING(255), allowNull: false },
+        name: { type: sequelize.Sequelize.STRING(255), allowNull: false },
+        frequency: { type: sequelize.Sequelize.STRING(50), allowNull: false },
+        run_time: { type: sequelize.Sequelize.STRING(50), allowNull: false },
+        recipients: { type: sequelize.Sequelize.TEXT, allowNull: false },
+        format: { type: sequelize.Sequelize.STRING(50), allowNull: false },
+        active: { type: sequelize.Sequelize.BOOLEAN, defaultValue: true, allowNull: false },
+        last_run: { type: sequelize.Sequelize.STRING(100), defaultValue: 'Never', allowNull: true },
+        user_id: { type: sequelize.Sequelize.INTEGER, allowNull: true, references: { model: 'users', key: 'id' }, onUpdate: 'CASCADE', onDelete: 'SET NULL' },
+        run_day: { type: sequelize.Sequelize.STRING(50), allowNull: true },
+        run_date: { type: sequelize.Sequelize.INTEGER, allowNull: true },
+        created_at: { type: sequelize.Sequelize.DATE, allowNull: false, defaultValue: sequelize.Sequelize.literal('CURRENT_TIMESTAMP') },
+        updated_at: { type: sequelize.Sequelize.DATE, allowNull: false, defaultValue: sequelize.Sequelize.literal('CURRENT_TIMESTAMP') }
+      });
+      console.log('[MIGRATION] report_schedules table created.');
+    } else {
+      const scheduleTableInfo = await queryInterface.describeTable('report_schedules');
+      if (!scheduleTableInfo.run_day) {
+        console.log('[MIGRATION] Adding run_day column to report_schedules...');
+        await queryInterface.addColumn('report_schedules', 'run_day', {
+          type: sequelize.Sequelize.STRING(50),
+          allowNull: true
+        });
+      }
+      if (!scheduleTableInfo.run_date) {
+        console.log('[MIGRATION] Adding run_date column to report_schedules...');
+        await queryInterface.addColumn('report_schedules', 'run_date', {
+          type: sequelize.Sequelize.INTEGER,
+          allowNull: true
+        });
+      }
+    }
+
   } catch (error) {
     console.error('[MIGRATION ERROR] Failed to run auto-migrations:', error.message);
   }
