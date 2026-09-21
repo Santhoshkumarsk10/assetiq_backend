@@ -165,24 +165,21 @@ async function checkAndMarkExpiredLicenses() {
 }
 
 /**
- * Scan for licenses expiring in <= 30 days and send 1-month-prior warnings.
- * Uses exact message matching to avoid sending duplicate alerts.
+ * Scan for licenses approaching expiration based on each license's configured renewal_alert days
+ * (e.g. 15 days, 30 days, 45 days) and trigger in-app notifications and email alerts.
+ * Uses exact message matching with expiration date to avoid sending duplicate alerts.
  */
 async function checkAndNotifyUpcomingExpiringLicenses() {
   try {
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
+    const todayDate = new Date(todayStr + 'T00:00:00');
 
-    const targetDate = new Date();
-    targetDate.setDate(targetDate.getDate() + 30);
-    const targetDateStr = targetDate.toISOString().split('T')[0];
-
-    // Find licenses expiring within 30 days
+    // Find all active or available licenses that have not yet expired
     const upcomingLicenses = await SoftwareLicense.findAll({
       where: {
         valid_until: {
-          [Op.gte]: todayStr,
-          [Op.lte]: targetDateStr
+          [Op.gte]: todayStr
         },
         status: {
           [Op.in]: ['active', 'available']
@@ -203,6 +200,20 @@ async function checkAndNotifyUpcomingExpiringLicenses() {
     const adminUsers = await getAdminUsers();
 
     for (const license of upcomingLicenses) {
+      if (!license.valid_until) continue;
+
+      // Extract configured alert threshold (e.g. "15 days" -> 15, "30 days" -> 30, "45 days" -> 45, default 30)
+      const alertDays = parseInt(String(license.renewal_alert || '').replace(/\D/g, '')) || 30;
+
+      const expiryDate = new Date(license.valid_until + 'T00:00:00');
+      const diffMs = expiryDate.getTime() - todayDate.getTime();
+      const daysRemaining = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+      // Trigger alert if within the configured number of days before expiry
+      if (daysRemaining < 0 || daysRemaining > alertDays) {
+        continue;
+      }
+
       // Check if notification already sent for this license and exact expiration date
       const alreadyNotified = await Notification.findOne({
         where: {
@@ -220,7 +231,8 @@ async function checkAndNotifyUpcomingExpiringLicenses() {
 
       const licenseTypeStr = license.license_type === 'subscription' ? 'Subscription' : 'Validity';
       const title = `⚠️ License Expiration Warning: ${license.software_name}`;
-      const message = `The ${licenseTypeStr.toLowerCase()} for "${license.software_name}" will expire in less than a month on ${license.valid_until}.`;
+      const remainingText = daysRemaining === 0 ? 'today' : daysRemaining === 1 ? 'in 1 day' : `in ${daysRemaining} days`;
+      const message = `The ${licenseTypeStr.toLowerCase()} for "${license.software_name}" will expire ${remainingText} on ${license.valid_until} (Alert window: ${alertDays} days).`;
 
       // 1. Notify Admins
       for (const adminUser of adminUsers) {
@@ -244,7 +256,8 @@ async function checkAndNotifyUpcomingExpiringLicenses() {
                 <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Software</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.software_name}</td></tr>
                 <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>License Type</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${licenseTypeStr}</td></tr>
                 <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>License Key</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.license_key.substring(0, 8)}...</td></tr>
-                <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Expires On</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; color: #d97706; font-weight: bold;">${license.valid_until}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Expires On</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; color: #d97706; font-weight: bold;">${license.valid_until} (${remainingText})</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Alert Timing</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">Triggered ${alertDays} days before expiry</td></tr>
                 ${license.user ? `<tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Assigned User</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.user.name} (${license.user.email})</td></tr>` : ''}
               </table>
               <p style="margin-top: 16px;">Please initiate a renewal request in the <strong>Aux AssetCare</strong> system.</p>
@@ -264,7 +277,7 @@ async function checkAndNotifyUpcomingExpiringLicenses() {
           await createNotification({
             userId: la.id,
             title,
-            message: `The license "${license.software_name}" assigned to ${license.user.name} at your location will expire on ${license.valid_until}.`,
+            message: `The license "${license.software_name}" assigned to ${license.user.name} at your location will expire ${remainingText} on ${license.valid_until}.`,
             type: 'license_expiring_soon',
             referenceId: license.id
           });
@@ -280,7 +293,8 @@ async function checkAndNotifyUpcomingExpiringLicenses() {
                 <table style="border-collapse: collapse; width: 100%;">
                   <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Software</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.software_name}</td></tr>
                   <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Assigned User</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.user.name} (${license.user.email})</td></tr>
-                  <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Expires On</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; color: #d97706; font-weight: bold;">${license.valid_until}</td></tr>
+                  <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Expires On</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; color: #d97706; font-weight: bold;">${license.valid_until} (${remainingText})</td></tr>
+                  <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Alert Timing</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">Triggered ${alertDays} days before expiry</td></tr>
                 </table>
                 <p style="margin-top: 16px;">The IT Admin has been notified and will process a renewal request.</p>
               </div>
@@ -294,7 +308,7 @@ async function checkAndNotifyUpcomingExpiringLicenses() {
         await createNotification({
           userId: license.user.id,
           title,
-          message: `Your assigned license for "${license.software_name}" will expire on ${license.valid_until}. Please contact the IT department if you still require it.`,
+          message: `Your assigned license for "${license.software_name}" will expire ${remainingText} on ${license.valid_until}. Please contact the IT department if you still require it.`,
           type: 'license_expiring_soon',
           referenceId: license.id
         });
@@ -309,7 +323,8 @@ async function checkAndNotifyUpcomingExpiringLicenses() {
               <p>The software license assigned to you is approaching its expiration date:</p>
               <table style="border-collapse: collapse; width: 100%;">
                 <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Software</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">${license.software_name}</td></tr>
-                <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Expires On</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; color: #d97706; font-weight: bold;">${license.valid_until}</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Expires On</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0; color: #d97706; font-weight: bold;">${license.valid_until} (${remainingText})</td></tr>
+                <tr><td style="padding: 8px; border: 1px solid #e2e8f0;"><strong>Alert Timing</strong></td><td style="padding: 8px; border: 1px solid #e2e8f0;">Triggered ${alertDays} days before expiry</td></tr>
               </table>
               <p style="margin-top: 16px;">Please contact your IT administrator or manager if you need to continue using this software.</p>
             </div>
@@ -317,7 +332,7 @@ async function checkAndNotifyUpcomingExpiringLicenses() {
         }).catch(() => {});
       }
 
-      console.log(`[LICENSE WARNING] Sent 1-month-prior warnings for license #${license.id} (${license.software_name}).`);
+      console.log(`[LICENSE WARNING] Sent ${alertDays}-day alert for license #${license.id} (${license.software_name}) expiring on ${license.valid_until} (${remainingText}).`);
     }
   } catch (err) {
     console.error('[LICENSE WARNING CHECK ERROR]', err.message);
@@ -399,7 +414,7 @@ async function listLicenses(req, res) {
  * Add Software License
  */
 async function addLicense(req, res) {
-  const { software_name, license_key, valid_from, valid_until, assigned_user_id, status, notes, license_type } = req.body;
+  const { software_name, license_key, valid_from, valid_until, assigned_user_id, status, notes, license_type, renewal_alert } = req.body;
 
   if (!software_name || !license_key) {
     return res.status(400).json({ error: 'Software Name and License Key are required.' });
@@ -418,7 +433,8 @@ async function addLicense(req, res) {
       assigned_user_id: assigned_user_id ? parseInt(assigned_user_id) : null,
       status: status || 'available',
       notes: notes || null,
-      license_type: license_type || 'validity'
+      license_type: license_type || 'validity',
+      renewal_alert: renewal_alert || '30 days'
     });
 
     await logAction({
@@ -445,7 +461,7 @@ async function addLicense(req, res) {
  */
 async function editLicense(req, res) {
   const id = req.body.id || req.params.id;
-  const { software_name, license_key, valid_from, valid_until, assigned_user_id, status, notes, license_type } = req.body;
+  const { software_name, license_key, valid_from, valid_until, assigned_user_id, status, notes, license_type, renewal_alert } = req.body;
 
   if (!id) {
     return res.status(400).json({ error: 'License ID is required.' });
@@ -469,6 +485,7 @@ async function editLicense(req, res) {
     license.status = status || license.status;
     license.notes = notes !== undefined ? notes : license.notes;
     license.license_type = license_type !== undefined ? license_type : license.license_type;
+    license.renewal_alert = renewal_alert !== undefined ? (renewal_alert || '30 days') : license.renewal_alert;
 
     await license.save();
 
