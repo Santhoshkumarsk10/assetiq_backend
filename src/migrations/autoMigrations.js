@@ -216,6 +216,11 @@ async function runAutoMigrations() {
           defaultValue: 'available',
           allowNull: false
         },
+        renewal_alert: {
+          type: sequelize.Sequelize.STRING(50),
+          defaultValue: '30 days',
+          allowNull: true
+        },
         notes: {
           type: sequelize.Sequelize.TEXT,
           allowNull: true
@@ -623,6 +628,14 @@ async function runAutoMigrations() {
         type: sequelize.Sequelize.ENUM('subscription', 'validity'),
         defaultValue: 'validity',
         allowNull: false
+      });
+    }
+    if (!licenseTableInfoForType.renewal_alert) {
+      console.log('[MIGRATION] Adding renewal_alert column to software_licenses...');
+      await queryInterface.addColumn('software_licenses', 'renewal_alert', {
+        type: sequelize.Sequelize.STRING(50),
+        defaultValue: '30 days',
+        allowNull: true
       });
     }
 

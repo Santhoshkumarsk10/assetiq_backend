@@ -37,6 +37,11 @@ const SoftwareLicense = sequelize.define('SoftwareLicense', {
     defaultValue: 'validity',
     allowNull: false
   },
+  renewal_alert: {
+    type: DataTypes.STRING(50),
+    defaultValue: '30 days',
+    allowNull: true
+  },
   notes: {
     type: DataTypes.TEXT,
     allowNull: true
