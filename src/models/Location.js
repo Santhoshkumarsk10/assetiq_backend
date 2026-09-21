@@ -20,6 +20,10 @@ const Location = sequelize.define('Location', {
   country_code: {
     type: DataTypes.STRING(10),
     allowNull: true
+  },
+  image: {
+    type: DataTypes.TEXT('long'),
+    allowNull: true
   }
 }, {
   timestamps: true,
