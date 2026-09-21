@@ -679,6 +679,16 @@ async function runAutoMigrations() {
       }
     }
 
+    // 16. Add image column to locations if missing
+    const locationTableInfo = await queryInterface.describeTable('locations');
+    if (!locationTableInfo.image) {
+      console.log('[MIGRATION] Adding image column to locations...');
+      await queryInterface.addColumn('locations', 'image', {
+        type: sequelize.Sequelize.TEXT('long'),
+        allowNull: true
+      });
+    }
+
   } catch (error) {
     console.error('[MIGRATION ERROR] Failed to run auto-migrations:', error.message);
   }

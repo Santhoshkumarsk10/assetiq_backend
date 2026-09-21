@@ -60,7 +60,7 @@ async function listLocations(req, res) {
  * Add Location
  */
 async function addLocation(req, res) {
-  const { name, address, country_code } = req.body;
+  const { name, address, country_code, image } = req.body;
 
   if (!name) {
     return res.status(400).json({ error: 'Location name is required.' });
@@ -72,7 +72,7 @@ async function addLocation(req, res) {
       return res.status(409).json({ error: `Location "${name}" already exists.` });
     }
 
-    const location = await Location.create({ name, address, country_code });
+    const location = await Location.create({ name, address, country_code, image });
 
     await logAction({
       userId: req.user.id,
@@ -98,7 +98,7 @@ async function addLocation(req, res) {
  */
 async function editLocation(req, res) {
   const id = req.body.id || req.params.id;
-  const { name, address, country_code } = req.body;
+  const { name, address, country_code, image } = req.body;
 
   if (!id) {
     return res.status(400).json({ error: 'Location ID is required.' });
@@ -126,6 +126,7 @@ async function editLocation(req, res) {
     location.name = name;
     location.address = address;
     location.country_code = country_code !== undefined ? country_code : location.country_code;
+    location.image = image !== undefined ? image : location.image;
     await location.save();
 
     await logAction({
